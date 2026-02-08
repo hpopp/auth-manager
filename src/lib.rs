@@ -23,7 +23,7 @@ use storage::Database;
 
 /// Shared application state
 pub struct AppState {
-    pub db: Database,
-    pub config: Config,
     pub cluster: RwLock<cluster::ClusterState>,
+    pub config: Config,
+    pub db: Database,
 }

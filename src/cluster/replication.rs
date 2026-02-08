@@ -13,12 +13,12 @@ use super::node::Role;
 
 #[derive(Debug, Error)]
 pub enum ReplicationError {
-    #[error("Not the leader")]
-    NotLeader,
-    #[error("Failed to reach quorum")]
-    NoQuorum,
     #[error("Database error: {0}")]
     Database(#[from] crate::storage::DatabaseError),
+    #[error("Failed to reach quorum")]
+    NoQuorum,
+    #[error("Not the leader")]
+    NotLeader,
 }
 
 /// Replicate a write operation to the cluster
@@ -44,21 +44,19 @@ pub async fn replicate_write(
     // Append to local log
     let sequence = append_to_log(&state.db, operation.clone())?;
     
-    // Replicate to peers
-    let quorum_size = state.config.quorum_size();
+    // Gather cluster info in a single lock acquisition
+    let (peers, leader_id, term, quorum_size) = {
+        let cluster = state.cluster.read().await;
+        let peers: Vec<_> = cluster.peer_states.iter()
+            .map(|(id, p)| (id.clone(), p.address.clone()))
+            .collect();
+        let leader_id = state.config.node.id.clone();
+        let term = cluster.current_term;
+        let quorum_size = cluster.quorum_size();
+        (peers, leader_id, term, quorum_size)
+    };
+
     let mut acks = 1; // Count self
-    
-    let cluster = state.cluster.read().await;
-    let peers: Vec<_> = cluster.peer_states.iter()
-        .map(|(id, p)| (id.clone(), p.address.clone()))
-        .collect();
-    drop(cluster);
-    
-    // Get leader info for replication requests
-    let cluster = state.cluster.read().await;
-    let leader_id = state.config.node.id.clone();
-    let term = cluster.current_term;
-    drop(cluster);
     
     // Send to all peers in parallel
     let mut handles = Vec::new();
@@ -121,16 +119,16 @@ fn append_to_log(db: &Database, operation: WriteOp) -> Result<u64, ReplicationEr
 #[derive(Debug, Serialize)]
 struct ReplicateRequest {
     leader_id: String,
-    term: u64,
-    sequence: u64,
     operation: WriteOp,
+    sequence: u64,
+    term: u64,
 }
 
 /// Response from replication RPC
 #[derive(Debug, Deserialize)]
 struct ReplicateResponse {
-    success: bool,
     sequence: u64,
+    success: bool,
 }
 
 /// Send a replication request to a peer

@@ -162,80 +162,80 @@ async fn forward_delete_to_leader(
 pub struct CreateSessionRequest {
     pub resource_id: String,
     #[serde(default)]
-    pub user_agent: Option<String>,
-    #[serde(default)]
     pub ttl_seconds: Option<u64>,
+    #[serde(default)]
+    pub user_agent: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateSessionResponse {
-    pub token: String,
     pub expires_at: String,
+    pub token: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SessionResponse {
-    pub token: String,
-    pub resource_id: String,
     pub created_at: String,
-    pub expires_at: String,
     pub device_info: DeviceInfoResponse,
+    pub expires_at: String,
+    pub resource_id: String,
+    pub token: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DeviceInfoResponse {
+    pub browser: Option<String>,
+    pub browser_version: Option<String>,
     pub kind: String,
     pub os: Option<String>,
     pub os_version: Option<String>,
-    pub browser: Option<String>,
-    pub browser_version: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateApiKeyRequest {
-    pub name: String,
     #[serde(default)]
     pub expires_in_days: Option<u64>,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateApiKeyResponse {
-    pub key: String,
-    pub id: String,
-    pub name: String,
     pub expires_at: Option<String>,
+    pub id: String,
+    pub key: String,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ApiKeyResponse {
-    pub id: String,
-    pub name: String,
     pub created_at: String,
     pub expires_at: Option<String>,
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
-    pub status: String,
     pub node_id: String,
+    pub status: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ClusterStatusResponse {
-    pub node_id: String,
-    pub role: String,
-    pub term: u64,
-    pub sequence: u64,
     pub cluster_size: usize,
-    pub quorum: usize,
+    pub node_id: String,
     pub peers: Vec<PeerStatus>,
+    pub quorum: usize,
+    pub role: String,
+    pub sequence: u64,
+    pub term: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct PeerStatus {
     pub id: String,
-    pub status: String,
     pub sequence: u64,
+    pub status: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -245,9 +245,9 @@ pub struct ErrorResponse {
 
 #[derive(Debug, Serialize)]
 pub struct PurgeResponse {
-    pub sessions_deleted: u64,
     pub api_keys_deleted: u64,
     pub replication_entries_deleted: u64,
+    pub sessions_deleted: u64,
 }
 
 // ============================================================================
@@ -257,36 +257,39 @@ pub struct PurgeResponse {
 #[derive(Debug, Deserialize)]
 pub struct ReplicateRequest {
     pub leader_id: String,
-    pub term: u64,
-    pub sequence: u64,
     pub operation: WriteOp,
+    pub sequence: u64,
+    pub term: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ReplicateResponse {
-    pub success: bool,
     pub sequence: u64,
+    pub success: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct HeartbeatRequest {
+    /// Leader's advertise address (for follower forwarding)
+    #[serde(default)]
+    pub leader_address: Option<String>,
     pub leader_id: String,
-    pub term: u64,
     pub sequence: u64,
+    pub term: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct HeartbeatResponse {
-    pub term: u64,
-    pub success: bool,
     pub sequence: u64,
+    pub success: bool,
+    pub term: u64,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct VoteRequest {
     pub candidate_id: String,
-    pub term: u64,
     pub last_sequence: u64,
+    pub term: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -675,8 +678,8 @@ pub async fn cluster_status(State(state): State<Arc<AppState>>) -> Json<ClusterS
         role: format!("{:?}", cluster.role),
         term: cluster.current_term,
         sequence: cluster.last_applied_sequence,
-        cluster_size: state.config.cluster.peers.len() + 1,
-        quorum: state.config.quorum_size(),
+        cluster_size: cluster.cluster_size(),
+        quorum: cluster.quorum_size(),
         peers: cluster
             .peer_states
             .iter()
@@ -830,6 +833,9 @@ pub async fn internal_heartbeat(
     }
     
     cluster.leader_id = Some(req.leader_id);
+    if let Some(addr) = req.leader_address {
+        cluster.leader_address = Some(addr);
+    }
     cluster.update_heartbeat();
     
     let sequence = cluster.last_applied_sequence;

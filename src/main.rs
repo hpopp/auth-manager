@@ -5,6 +5,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use auth_manager::{
     api, cluster, config::Config, expiration, storage::Database, AppState,
 };
+use cluster::discovery::{Discovery, DnsPoll, StaticList};
+use auth_manager::config::DiscoveryStrategy;
 use tokio::sync::RwLock;
 
 #[tokio::main]
@@ -25,6 +27,9 @@ async fn main() -> anyhow::Result<()> {
     let db = Database::open(&config.node.data_dir)?;
     info!("Database opened at: {}", config.node.data_dir);
 
+    // Build discovery strategy
+    let discovery = build_discovery(&config);
+
     // Initialize cluster state
     let cluster_state = cluster::ClusterState::new(&config, &db)?;
     
@@ -35,12 +40,26 @@ async fn main() -> anyhow::Result<()> {
         cluster: RwLock::new(cluster_state),
     });
 
+    // Run initial peer discovery before starting cluster tasks
+    if let Some(ref disc) = discovery {
+        match disc.discover_peers().await {
+            Ok(peers) => {
+                let mut cluster = state.cluster.write().await;
+                cluster.update_discovered_peers(peers);
+                info!("Initial discovery found {} peer(s)", cluster.peer_states.len());
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Initial peer discovery failed (will retry in background)");
+            }
+        }
+    }
+
     // Start background tasks
     let expiration_handle = expiration::start_expiration_cleaner(Arc::clone(&state));
     
-    // Start cluster tasks (heartbeat, election) if in cluster mode
-    let cluster_handle = if !config.cluster.peers.is_empty() {
-        Some(cluster::start_cluster_tasks(Arc::clone(&state)))
+    // Start cluster tasks (heartbeat, election, discovery) if in cluster mode
+    let cluster_handle = if !config.is_single_node() {
+        Some(cluster::start_cluster_tasks(Arc::clone(&state), discovery))
     } else {
         info!("Running in single-node mode (no peers configured)");
         None
@@ -60,4 +79,31 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Build the appropriate discovery strategy from configuration
+fn build_discovery(config: &Config) -> Option<Discovery> {
+    if config.is_single_node() {
+        return None;
+    }
+
+    match config.cluster.discovery.strategy {
+        DiscoveryStrategy::Dns => {
+            let dns_name = config.cluster.discovery.dns_name.clone()
+                .expect("dns_name is required when discovery strategy is 'dns'");
+            let port = config.node.bind_address
+                .rsplit(':')
+                .next()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(8080u16);
+            Some(Discovery::Dns(DnsPoll::new(dns_name, port)))
+        }
+        DiscoveryStrategy::Static => {
+            if config.cluster.peers.is_empty() {
+                None
+            } else {
+                Some(Discovery::Static(StaticList::new(config.cluster.peers.clone())))
+            }
+        }
+    }
 }

@@ -10,10 +10,10 @@ use super::generator::generate_token;
 pub enum SessionError {
     #[error("Database error: {0}")]
     Database(#[from] crate::storage::DatabaseError),
-    #[error("Session not found")]
-    NotFound,
     #[error("Session expired")]
     Expired,
+    #[error("Session not found")]
+    NotFound,
 }
 
 /// Create a new session token

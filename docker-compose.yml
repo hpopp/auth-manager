@@ -1,12 +1,31 @@
+# DNS-based discovery: all nodes share a network alias that resolves to all container IPs.
+# No need to list peers explicitly — each node discovers the others via DNS.
+#
+# Kubernetes equivalent: create a headless Service and set
+#   AUTH_MANAGER_DISCOVERY_DNS_NAME to the service FQDN.
+
 x-common-env: &common-env
   AUTH_MANAGER_BIND_ADDRESS: "0.0.0.0:8080"
   AUTH_MANAGER_DATA_DIR: /data
-  AUTH_MANAGER_PEERS: node-1:8080,node-2:8080,node-3:8080
+  AUTH_MANAGER_DISCOVERY_DNS_NAME: auth-manager
   RUST_LOG: auth_manager=debug
+
+x-common: &common
+  build: .
+  networks:
+    auth-network:
+      aliases:
+        - auth-manager
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+    start_period: 10s
 
 services:
   node-1:
-    build: .
+    <<: *common
     container_name: auth-manager-node-1
     environment:
       <<: *common-env
@@ -15,17 +34,9 @@ services:
       - "8081:8080"
     volumes:
       - node1-data:/data
-    networks:
-      - auth-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
 
   node-2:
-    build: .
+    <<: *common
     container_name: auth-manager-node-2
     environment:
       <<: *common-env
@@ -34,17 +45,9 @@ services:
       - "8082:8080"
     volumes:
       - node2-data:/data
-    networks:
-      - auth-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
 
   node-3:
-    build: .
+    <<: *common
     container_name: auth-manager-node-3
     environment:
       <<: *common-env
@@ -53,14 +56,6 @@ services:
       - "8083:8080"
     volumes:
       - node3-data:/data
-    networks:
-      - auth-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
 
 volumes:
   node1-data:

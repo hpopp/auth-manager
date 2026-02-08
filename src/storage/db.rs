@@ -7,22 +7,22 @@ use super::tables::*;
 
 #[derive(Debug, Error)]
 pub enum DatabaseError {
+    #[error("Commit error: {0}")]
+    Commit(#[from] redb::CommitError),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("Database error: {0}")]
     Redb(#[from] redb::Error),
     #[error("Database error: {0}")]
     RedbDatabase(#[from] redb::DatabaseError),
-    #[error("Transaction error: {0}")]
-    Transaction(#[from] redb::TransactionError),
-    #[error("Table error: {0}")]
-    Table(#[from] redb::TableError),
-    #[error("Storage error: {0}")]
-    Storage(#[from] redb::StorageError),
-    #[error("Commit error: {0}")]
-    Commit(#[from] redb::CommitError),
     #[error("Serialization error: {0}")]
     Serialization(#[from] bincode::Error),
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("Storage error: {0}")]
+    Storage(#[from] redb::StorageError),
+    #[error("Table error: {0}")]
+    Table(#[from] redb::TableError),
+    #[error("Transaction error: {0}")]
+    Transaction(#[from] redb::TransactionError),
 }
 
 pub struct Database {

@@ -7,6 +7,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 use crate::AppState;
+use super::discovery;
 use super::node::Role;
 
 /// Start the heartbeat task
@@ -29,15 +30,19 @@ pub fn start_heartbeat_task(state: Arc<AppState>) -> JoinHandle<()> {
                 let term = cluster.current_term;
                 let sequence = cluster.last_applied_sequence;
                 let leader_id = state.config.node.id.clone();
+                let leader_address = discovery::compute_advertise_address(
+                    &state.config.node.bind_address,
+                );
                 drop(cluster);
                 
                 // Send heartbeats to all peers
                 for (peer_id, peer_addr) in peers {
                     let state = Arc::clone(&state);
                     let lid = leader_id.clone();
+                    let la = leader_address.clone();
                     
                     tokio::spawn(async move {
-                        match send_heartbeat(&peer_addr, &lid, term, sequence).await {
+                        match send_heartbeat(&peer_addr, &lid, &la, term, sequence).await {
                             Ok((peer_term, peer_sequence)) => {
                                 let mut cluster = state.cluster.write().await;
                                 
@@ -65,23 +70,25 @@ pub fn start_heartbeat_task(state: Arc<AppState>) -> JoinHandle<()> {
 /// Request body for heartbeat RPC
 #[derive(Debug, Serialize)]
 struct HeartbeatRequest {
+    leader_address: String,
     leader_id: String,
-    term: u64,
     sequence: u64,
+    term: u64,
 }
 
 /// Response from heartbeat RPC
 #[derive(Debug, Deserialize)]
 struct HeartbeatResponse {
-    term: u64,
-    success: bool,
     sequence: u64,
+    success: bool,
+    term: u64,
 }
 
 /// Send a heartbeat to a peer
 async fn send_heartbeat(
     peer_addr: &str,
     leader_id: &str,
+    leader_address: &str,
     term: u64,
     sequence: u64,
 ) -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
@@ -93,6 +100,7 @@ async fn send_heartbeat(
     
     let request = HeartbeatRequest {
         leader_id: leader_id.to_string(),
+        leader_address: leader_address.to_string(),
         term,
         sequence,
     };

@@ -10,10 +10,10 @@ use super::generator::{generate_api_key, hash_key};
 pub enum ApiKeyError {
     #[error("Database error: {0}")]
     Database(#[from] crate::storage::DatabaseError),
-    #[error("API key not found")]
-    NotFound,
     #[error("API key expired")]
     Expired,
+    #[error("API key not found")]
+    NotFound,
 }
 
 /// Create a new API key

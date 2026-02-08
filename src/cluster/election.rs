@@ -7,6 +7,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::AppState;
+use super::discovery;
 use super::node::Role;
 
 /// Start the election monitor task
@@ -56,9 +57,12 @@ pub fn start_election_monitor(state: Arc<AppState>) -> JoinHandle<()> {
                 }
                 Role::Candidate => {
                     // Check if we've won the election
-                    let cluster_size = state.config.cluster.peers.len() + 1;
+                    let cluster_size = cluster.cluster_size();
                     if cluster.has_majority(cluster_size) {
                         cluster.become_leader(&state.config.node.id);
+                        cluster.leader_address = Some(
+                            discovery::compute_advertise_address(&state.config.node.bind_address),
+                        );
                         
                         // Persist state
                         if let Err(e) = cluster.persist(&state.db, &state.config.node.id) {
@@ -120,8 +124,8 @@ async fn request_votes(state: Arc<AppState>) {
 #[derive(Debug, Serialize)]
 struct VoteRequest {
     candidate_id: String,
-    term: u64,
     last_sequence: u64,
+    term: u64,
 }
 
 /// Response from vote RPC

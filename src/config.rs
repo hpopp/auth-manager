@@ -5,51 +5,74 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error("Failed to read config file: {0}")]
-    ReadError(#[from] std::io::Error),
     #[error("Failed to parse config: {0}")]
     ParseError(#[from] toml::de::Error),
+    #[error("Failed to read config file: {0}")]
+    ReadError(#[from] std::io::Error),
     #[error("Invalid configuration: {0}")]
     ValidationError(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub node: NodeConfig,
     pub cluster: ClusterConfig,
+    pub node: NodeConfig,
     #[serde(default)]
     pub tokens: TokenConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
-    pub id: String,
     #[serde(default = "default_bind_address")]
     pub bind_address: String,
     #[serde(default = "default_data_dir")]
     pub data_dir: String,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterConfig {
     #[serde(default)]
-    pub peers: Vec<String>,
-    #[serde(default = "default_heartbeat_interval_ms")]
-    pub heartbeat_interval_ms: u64,
+    pub discovery: DiscoveryConfig,
     #[serde(default = "default_election_timeout_ms")]
     pub election_timeout_ms: u64,
-    #[serde(default = "default_log_retention_entries")]
-    pub log_retention_entries: u64,
+    #[serde(default = "default_heartbeat_interval_ms")]
+    pub heartbeat_interval_ms: u64,
     #[serde(default = "default_log_retention_days")]
     pub log_retention_days: u64,
+    #[serde(default = "default_log_retention_entries")]
+    pub log_retention_entries: u64,
+    #[serde(default)]
+    pub peers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveryConfig {
+    /// DNS name to resolve for peer discovery (required for dns strategy)
+    #[serde(default)]
+    pub dns_name: Option<String>,
+    /// How often to poll for peer changes (seconds)
+    #[serde(default = "default_poll_interval_seconds")]
+    pub poll_interval_seconds: u64,
+    /// Discovery strategy: "dns" or "static"
+    #[serde(default)]
+    pub strategy: DiscoveryStrategy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DiscoveryStrategy {
+    Dns,
+    #[default]
+    Static,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenConfig {
-    #[serde(default = "default_session_ttl_seconds")]
-    pub session_ttl_seconds: u64,
     #[serde(default = "default_cleanup_interval_seconds")]
     pub cleanup_interval_seconds: u64,
+    #[serde(default = "default_session_ttl_seconds")]
+    pub session_ttl_seconds: u64,
 }
 
 fn default_bind_address() -> String {
@@ -76,6 +99,10 @@ fn default_log_retention_days() -> u64 {
     7
 }
 
+fn default_poll_interval_seconds() -> u64 {
+    5
+}
+
 fn default_session_ttl_seconds() -> u64 {
     86400 // 24 hours
 }
@@ -87,8 +114,18 @@ fn default_cleanup_interval_seconds() -> u64 {
 impl Default for TokenConfig {
     fn default() -> Self {
         Self {
-            session_ttl_seconds: default_session_ttl_seconds(),
             cleanup_interval_seconds: default_cleanup_interval_seconds(),
+            session_ttl_seconds: default_session_ttl_seconds(),
+        }
+    }
+}
+
+impl Default for DiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            dns_name: None,
+            poll_interval_seconds: default_poll_interval_seconds(),
+            strategy: DiscoveryStrategy::Static,
         }
     }
 }
@@ -96,11 +133,12 @@ impl Default for TokenConfig {
 impl Default for ClusterConfig {
     fn default() -> Self {
         Self {
-            peers: Vec::new(),
-            heartbeat_interval_ms: default_heartbeat_interval_ms(),
+            discovery: DiscoveryConfig::default(),
             election_timeout_ms: default_election_timeout_ms(),
-            log_retention_entries: default_log_retention_entries(),
+            heartbeat_interval_ms: default_heartbeat_interval_ms(),
             log_retention_days: default_log_retention_days(),
+            log_retention_entries: default_log_retention_entries(),
+            peers: Vec::new(),
         }
     }
 }
@@ -139,6 +177,24 @@ impl Config {
                 })
                 .unwrap_or_default();
 
+            // Discovery configuration from environment
+            let dns_name = std::env::var("AUTH_MANAGER_DISCOVERY_DNS_NAME").ok();
+            let discovery_strategy = if dns_name.is_some() {
+                DiscoveryStrategy::Dns
+            } else {
+                std::env::var("AUTH_MANAGER_DISCOVERY_STRATEGY")
+                    .ok()
+                    .and_then(|s| match s.to_lowercase().as_str() {
+                        "dns" => Some(DiscoveryStrategy::Dns),
+                        _ => Some(DiscoveryStrategy::Static),
+                    })
+                    .unwrap_or(DiscoveryStrategy::Static)
+            };
+            let poll_interval = std::env::var("AUTH_MANAGER_DISCOVERY_POLL_INTERVAL")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(default_poll_interval_seconds());
+
             Ok(Config {
                 node: NodeConfig {
                     id: node_id,
@@ -147,6 +203,11 @@ impl Config {
                 },
                 cluster: ClusterConfig {
                     peers,
+                    discovery: DiscoveryConfig {
+                        strategy: discovery_strategy,
+                        dns_name,
+                        poll_interval_seconds: poll_interval,
+                    },
                     ..Default::default()
                 },
                 tokens: TokenConfig::default(),
@@ -179,7 +240,9 @@ impl Config {
     }
 
     /// Check if running in single-node mode
+    ///
+    /// Returns false if either static peers or DNS discovery is configured.
     pub fn is_single_node(&self) -> bool {
-        self.cluster.peers.is_empty()
+        self.cluster.peers.is_empty() && self.cluster.discovery.dns_name.is_none()
     }
 }

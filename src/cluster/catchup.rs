@@ -20,17 +20,17 @@ pub enum CatchupError {
 /// Sync response from leader
 #[derive(Debug, Clone)]
 pub struct SyncResponse {
-    pub snapshot: Option<Snapshot>,
-    pub log_entries: Vec<ReplicatedWrite>,
     pub leader_sequence: u64,
+    pub log_entries: Vec<ReplicatedWrite>,
+    pub snapshot: Option<Snapshot>,
 }
 
 /// Full state snapshot
 #[derive(Debug, Clone)]
 pub struct Snapshot {
+    pub api_keys: Vec<ApiKey>,
     pub sequence: u64,
     pub sessions: Vec<SessionToken>,
-    pub api_keys: Vec<ApiKey>,
 }
 
 /// Request sync from the leader

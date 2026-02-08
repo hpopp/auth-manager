@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 use thiserror::Error;
 
 use crate::config::Config;
@@ -9,44 +10,49 @@ use crate::storage::Database;
 pub enum ClusterError {
     #[error("Database error: {0}")]
     Database(#[from] crate::storage::DatabaseError),
-    #[error("Not the leader")]
-    NotLeader,
     #[error("No quorum available")]
     NoQuorum,
+    #[error("Not the leader")]
+    NotLeader,
 }
 
 /// Role of this node in the cluster
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
-    Leader,
-    Follower,
     Candidate,
+    Follower,
+    Leader,
 }
 
 /// Status of a peer node
 #[derive(Debug, Clone)]
 pub struct PeerState {
     pub address: String,
-    pub status: String,
-    pub sequence: u64,
     pub last_seen: std::time::Instant,
+    pub sequence: u64,
+    pub status: String,
 }
 
 /// In-memory cluster state
 #[derive(Debug)]
 pub struct ClusterState {
-    pub role: Role,
     pub current_term: u64,
-    pub voted_for: Option<String>,
     pub last_applied_sequence: u64,
+    pub last_heartbeat: std::time::Instant,
+    /// Direct address of the leader (set from heartbeats)
+    pub leader_address: Option<String>,
     pub leader_id: Option<String>,
     pub peer_states: HashMap<String, PeerState>,
+    pub role: Role,
+    pub voted_for: Option<String>,
     pub votes_received: usize,
-    pub last_heartbeat: std::time::Instant,
 }
 
 impl ClusterState {
     /// Create a new cluster state from config and persisted state
+    ///
+    /// Peers start empty — they are populated by the discovery task
+    /// (DNS or static) before cluster tasks begin.
     pub fn new(config: &Config, db: &Database) -> Result<Self, ClusterError> {
         // Load persisted state or create new
         let node_state = db.get_node_state()?.unwrap_or_else(|| {
@@ -54,22 +60,6 @@ impl ClusterState {
             let _ = db.put_node_state(&state);
             state
         });
-
-        // Initialize peer states
-        let mut peer_states = HashMap::new();
-        for peer_addr in &config.cluster.peers {
-            // Extract peer ID from address (or use address as ID)
-            let peer_id = peer_addr.split(':').next().unwrap_or(peer_addr).to_string();
-            peer_states.insert(
-                peer_id,
-                PeerState {
-                    address: peer_addr.clone(),
-                    status: "unknown".to_string(),
-                    sequence: 0,
-                    last_seen: std::time::Instant::now(),
-                },
-            );
-        }
 
         // Start as follower if in cluster mode, leader if single-node
         let role = if config.is_single_node() {
@@ -84,7 +74,8 @@ impl ClusterState {
             voted_for: node_state.voted_for,
             last_applied_sequence: node_state.last_applied_sequence,
             leader_id: None,
-            peer_states,
+            leader_address: None,
+            peer_states: HashMap::new(),
             votes_received: 0,
             last_heartbeat: std::time::Instant::now(),
         })
@@ -117,6 +108,7 @@ impl ClusterState {
         self.role = Role::Follower;
         self.current_term = term;
         self.leader_id = leader_id;
+        self.leader_address = None; // Will be set by next heartbeat
         self.votes_received = 0;
         self.voted_for = None;
     }
@@ -163,8 +155,61 @@ impl ClusterState {
     }
 
     /// Get the leader's address if known
+    ///
+    /// Prefers the directly-advertised leader address (from heartbeats),
+    /// falls back to looking up leader_id in peer_states.
     pub fn get_leader_address(&self) -> Option<String> {
+        if let Some(ref addr) = self.leader_address {
+            return Some(addr.clone());
+        }
         let leader_id = self.leader_id.as_ref()?;
         self.peer_states.get(leader_id).map(|p| p.address.clone())
+    }
+
+    /// Current cluster size (discovered peers + self)
+    pub fn cluster_size(&self) -> usize {
+        self.peer_states.len() + 1
+    }
+
+    /// Required quorum size for writes (majority)
+    pub fn quorum_size(&self) -> usize {
+        self.cluster_size() / 2 + 1
+    }
+
+    /// Update the set of known peers from discovery results
+    ///
+    /// Adds newly discovered peers and removes peers that are no longer
+    /// reported by discovery (e.g., removed from DNS).
+    pub fn update_discovered_peers(&mut self, addrs: Vec<SocketAddr>) {
+        let discovered: HashSet<String> = addrs.iter()
+            .map(|a| a.to_string())
+            .collect();
+
+        // Add newly discovered peers
+        for addr_str in &discovered {
+            if !self.peer_states.contains_key(addr_str) {
+                self.peer_states.insert(
+                    addr_str.clone(),
+                    PeerState {
+                        address: addr_str.clone(),
+                        status: "discovered".to_string(),
+                        sequence: 0,
+                        last_seen: std::time::Instant::now(),
+                    },
+                );
+                tracing::info!(peer = %addr_str, "Discovered new peer");
+            }
+        }
+
+        // Remove peers that are no longer in discovery results
+        let removed: Vec<String> = self.peer_states.keys()
+            .filter(|k| !discovered.contains(*k))
+            .cloned()
+            .collect();
+
+        for peer_id in &removed {
+            self.peer_states.remove(peer_id);
+            tracing::info!(peer = %peer_id, "Peer removed from discovery");
+        }
     }
 }
