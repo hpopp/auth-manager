@@ -128,6 +128,7 @@ struct ReplicateRequest {
 
 /// Response from replication RPC
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ReplicateResponse {
     sequence: u64,
     success: bool,

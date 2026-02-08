@@ -79,6 +79,7 @@ struct HeartbeatRequest {
 
 /// Response from heartbeat RPC
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct HeartbeatResponse {
     sequence: u64,
     success: bool,

@@ -66,7 +66,7 @@ async fn test_multiple_sessions_per_resource() {
         auth_manager::tokens::session::create(&db, "user-456", device_info.clone(), 3600).unwrap();
     let s2 =
         auth_manager::tokens::session::create(&db, "user-456", device_info.clone(), 3600).unwrap();
-    let s3 =
+    let _s3 =
         auth_manager::tokens::session::create(&db, "user-789", device_info.clone(), 3600).unwrap();
 
     // List sessions by resource

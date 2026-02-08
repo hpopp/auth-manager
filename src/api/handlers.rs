@@ -256,6 +256,7 @@ pub struct ReplicateResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct HeartbeatRequest {
     /// Leader's advertise address (for follower forwarding)
     #[serde(default)]

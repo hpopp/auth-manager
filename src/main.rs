@@ -10,13 +10,26 @@ use tokio::sync::RwLock;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "auth_manager=debug,tower_http=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "auth_manager=debug,tower_http=debug".into());
+
+    let log_format = std::env::var("LOG_FORMAT").unwrap_or_default();
+    if log_format.eq_ignore_ascii_case("json") {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_target(true)
+                    .with_span_list(false),
+            )
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+    }
 
     // Load configuration
     let config = Config::load()?;
