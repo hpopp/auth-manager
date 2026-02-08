@@ -144,8 +144,15 @@ mod tests {
         let (db, _temp) = setup_db();
 
         let expires_at = Utc::now() + chrono::Duration::days(30);
-        let (_, api_key) =
-            create(&db, "Expiring Key", "user-456", None, Some(expires_at), vec![]).unwrap();
+        let (_, api_key) = create(
+            &db,
+            "Expiring Key",
+            "user-456",
+            None,
+            Some(expires_at),
+            vec![],
+        )
+        .unwrap();
         assert!(api_key.expires_at.is_some());
     }
 
