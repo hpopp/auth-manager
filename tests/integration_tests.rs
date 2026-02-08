@@ -21,7 +21,7 @@ async fn test_session_lifecycle() {
     // Validate it exists (by secret token)
     let validated = auth_manager::tokens::session::validate(&db, &session.token).unwrap();
     assert!(validated.is_some());
-    assert_eq!(validated.unwrap().resource_id, "user-123");
+    assert_eq!(validated.unwrap().subject_id, "user-123");
 
     // Revoke it (by secret token)
     let revoked = auth_manager::tokens::session::revoke(&db, &session.token).unwrap();
@@ -40,7 +40,7 @@ async fn test_api_key_lifecycle() {
     let (key, api_key) = auth_manager::tokens::api_key::create(
         &db,
         "Test API Key",
-        "resource-123",
+        "subject-123",
         None,
         Some(30),
         vec![],
@@ -63,10 +63,10 @@ async fn test_api_key_lifecycle() {
 }
 
 #[tokio::test]
-async fn test_multiple_sessions_per_resource() {
+async fn test_multiple_sessions_per_subject() {
     let (db, _temp) = setup_test_db();
 
-    // Create multiple sessions for the same resource
+    // Create multiple sessions for the same subject
     let device_info = auth_manager::storage::models::DeviceInfo::default();
     let s1 =
         auth_manager::tokens::session::create(&db, "user-456", device_info.clone(), 3600).unwrap();
@@ -75,18 +75,18 @@ async fn test_multiple_sessions_per_resource() {
     let _s3 =
         auth_manager::tokens::session::create(&db, "user-789", device_info.clone(), 3600).unwrap();
 
-    // List sessions by resource
-    let sessions = auth_manager::tokens::session::list_by_resource(&db, "user-456").unwrap();
+    // List sessions by subject
+    let sessions = auth_manager::tokens::session::list_by_subject(&db, "user-456").unwrap();
     assert_eq!(sessions.len(), 2);
 
-    let sessions = auth_manager::tokens::session::list_by_resource(&db, "user-789").unwrap();
+    let sessions = auth_manager::tokens::session::list_by_subject(&db, "user-789").unwrap();
     assert_eq!(sessions.len(), 1);
 
     // Revoke one session (by token)
     auth_manager::tokens::session::revoke(&db, &s1.token).unwrap();
 
     // Verify only one remains
-    let sessions = auth_manager::tokens::session::list_by_resource(&db, "user-456").unwrap();
+    let sessions = auth_manager::tokens::session::list_by_subject(&db, "user-456").unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, s2.id);
 }

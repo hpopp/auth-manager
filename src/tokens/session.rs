@@ -19,7 +19,7 @@ pub enum SessionError {
 /// Create a new session token
 pub fn create(
     db: &Database,
-    resource_id: &str,
+    subject_id: &str,
     device_info: DeviceInfo,
     ttl_seconds: u64,
 ) -> Result<SessionToken, SessionError> {
@@ -29,12 +29,12 @@ pub fn create(
         device_info,
         expires_at: now + Duration::seconds(ttl_seconds as i64),
         id: uuid::Uuid::new_v4().to_string(),
-        resource_id: resource_id.to_string(),
+        subject_id: subject_id.to_string(),
         token: generate_token(),
     };
 
     db.put_session(&session)?;
-    tracing::debug!(id = %session.id, resource_id = %resource_id, "Created session token");
+    tracing::debug!(id = %session.id, subject_id = %subject_id, "Created session token");
 
     Ok(session)
 }
@@ -66,11 +66,8 @@ pub fn revoke(db: &Database, token: &str) -> Result<bool, SessionError> {
 }
 
 /// List all sessions for a resource
-pub fn list_by_resource(
-    db: &Database,
-    resource_id: &str,
-) -> Result<Vec<SessionToken>, SessionError> {
-    let sessions = db.get_sessions_by_resource(resource_id)?;
+pub fn list_by_subject(db: &Database, subject_id: &str) -> Result<Vec<SessionToken>, SessionError> {
+    let sessions = db.get_sessions_by_subject(subject_id)?;
     let now = Utc::now();
 
     // Filter out expired sessions
@@ -120,7 +117,7 @@ mod tests {
         assert!(!session.id.is_empty());
         assert!(!session.token.is_empty());
         assert_ne!(session.id, session.token);
-        assert_eq!(session.resource_id, "user123");
+        assert_eq!(session.subject_id, "user123");
 
         let validated = validate(&db, &session.token).unwrap();
         assert!(validated.is_some());
@@ -138,17 +135,17 @@ mod tests {
     }
 
     #[test]
-    fn test_list_by_resource() {
+    fn test_list_by_subject() {
         let (db, _temp) = setup_db();
 
         create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
         create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
         create(&db, "user456", DeviceInfo::default(), 3600).unwrap();
 
-        let sessions = list_by_resource(&db, "user123").unwrap();
+        let sessions = list_by_subject(&db, "user123").unwrap();
         assert_eq!(sessions.len(), 2);
 
-        let sessions = list_by_resource(&db, "user456").unwrap();
+        let sessions = list_by_subject(&db, "user456").unwrap();
         assert_eq!(sessions.len(), 1);
     }
 }

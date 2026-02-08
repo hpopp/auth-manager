@@ -16,7 +16,7 @@ headers {
 
 body:json {
   {
-    "resource_id": "user-123",
+    "subject_id": "user-123",
     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "ttl_seconds": 3600
   }
@@ -30,13 +30,13 @@ vars:post-response {
 docs {
   # Create Session
   
-  Creates a new session token for a resource (user, service, device, etc.).
+  Creates a new session token for a subject (user, service, device, etc.).
   
   ## Request Body
   
   | Field | Type | Required | Description |
   |-------|------|----------|-------------|
-  | resource_id | string | Yes | Identifier for the resource owning this session |
+  | subject_id | string | Yes | Identifier for the subject (actor) owning this session |
   | user_agent | string | No | User-Agent string for device detection |
   | ttl_seconds | number | No | Time-to-live in seconds (default: 86400) |
   

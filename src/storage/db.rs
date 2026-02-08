@@ -44,8 +44,8 @@ impl Database {
             let _ = write_txn.open_table(API_KEYS)?;
             let _ = write_txn.open_table(REPLICATION_LOG)?;
             let _ = write_txn.open_table(NODE_META)?;
-            let _ = write_txn.open_table(RESOURCE_API_KEYS)?;
-            let _ = write_txn.open_table(RESOURCE_SESSIONS)?;
+            let _ = write_txn.open_table(SUBJECT_API_KEYS)?;
+            let _ = write_txn.open_table(SUBJECT_SESSIONS)?;
             let _ = write_txn.open_table(SESSION_IDS)?;
             let _ = write_txn.open_table(API_KEY_IDS)?;
         }
@@ -77,16 +77,16 @@ impl Database {
             table.insert(session.token.as_str(), data.as_slice())?;
 
             // Update resource_sessions index (keyed by token)
-            let mut index_table = write_txn.open_table(RESOURCE_SESSIONS)?;
+            let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
             let mut tokens: Vec<String> = index_table
-                .get(session.resource_id.as_str())?
+                .get(session.subject_id.as_str())?
                 .map(|v| bincode::deserialize(v.value()).unwrap_or_default())
                 .unwrap_or_default();
 
             if !tokens.contains(&session.token) {
                 tokens.push(session.token.clone());
                 let index_data = bincode::serialize(&tokens)?;
-                index_table.insert(session.resource_id.as_str(), index_data.as_slice())?;
+                index_table.insert(session.subject_id.as_str(), index_data.as_slice())?;
             }
 
             // Update session ID index (UUID -> token)
@@ -133,14 +133,14 @@ impl Database {
             match result {
                 Some(data) => {
                     let session: SessionToken = bincode::deserialize(data.value())?;
-                    Some((session.resource_id, session.id))
+                    Some((session.subject_id, session.id))
                 }
                 None => None,
             }
         };
 
         let deleted = match session_info {
-            Some((resource_id, session_id)) => {
+            Some((subject_id, session_id)) => {
                 // Remove from sessions table
                 {
                     let mut table = write_txn.open_table(SESSIONS)?;
@@ -149,8 +149,8 @@ impl Database {
 
                 // Update resource_sessions index
                 let tokens: Option<Vec<String>> = {
-                    let index_table = write_txn.open_table(RESOURCE_SESSIONS)?;
-                    let result = index_table.get(resource_id.as_str())?;
+                    let index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
+                    let result = index_table.get(subject_id.as_str())?;
                     match result {
                         Some(data) => Some(bincode::deserialize(data.value())?),
                         None => None,
@@ -159,12 +159,12 @@ impl Database {
 
                 if let Some(mut t) = tokens {
                     t.retain(|v| v != token);
-                    let mut index_table = write_txn.open_table(RESOURCE_SESSIONS)?;
+                    let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
                     if t.is_empty() {
-                        index_table.remove(resource_id.as_str())?;
+                        index_table.remove(subject_id.as_str())?;
                     } else {
                         let new_index_data = bincode::serialize(&t)?;
-                        index_table.insert(resource_id.as_str(), new_index_data.as_slice())?;
+                        index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
 
@@ -184,15 +184,15 @@ impl Database {
     }
 
     /// Get all sessions for a resource
-    pub fn get_sessions_by_resource(
+    pub fn get_sessions_by_subject(
         &self,
-        resource_id: &str,
+        subject_id: &str,
     ) -> Result<Vec<SessionToken>, DatabaseError> {
         let read_txn = self.begin_read()?;
-        let index_table = read_txn.open_table(RESOURCE_SESSIONS)?;
+        let index_table = read_txn.open_table(SUBJECT_SESSIONS)?;
         let sessions_table = read_txn.open_table(SESSIONS)?;
 
-        let token_ids: Vec<String> = match index_table.get(resource_id)? {
+        let token_ids: Vec<String> = match index_table.get(subject_id)? {
             Some(data) => bincode::deserialize(data.value())?,
             None => return Ok(Vec::new()),
         };
@@ -236,16 +236,16 @@ impl Database {
             table.insert(api_key.key_hash.as_str(), data.as_slice())?;
 
             // Update resource_api_keys index
-            let mut index_table = write_txn.open_table(RESOURCE_API_KEYS)?;
+            let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
             let mut key_hashes: Vec<String> = index_table
-                .get(api_key.resource_id.as_str())?
+                .get(api_key.subject_id.as_str())?
                 .map(|v| bincode::deserialize(v.value()).unwrap_or_default())
                 .unwrap_or_default();
 
             if !key_hashes.contains(&api_key.key_hash) {
                 key_hashes.push(api_key.key_hash.clone());
                 let index_data = bincode::serialize(&key_hashes)?;
-                index_table.insert(api_key.resource_id.as_str(), index_data.as_slice())?;
+                index_table.insert(api_key.subject_id.as_str(), index_data.as_slice())?;
             }
 
             // Update API key ID index (UUID -> key_hash)
@@ -292,14 +292,14 @@ impl Database {
             match result {
                 Some(data) => {
                     let api_key: ApiKey = bincode::deserialize(data.value())?;
-                    Some((api_key.resource_id, api_key.id))
+                    Some((api_key.subject_id, api_key.id))
                 }
                 None => None,
             }
         };
 
         let deleted = match api_key_info {
-            Some((resource_id, api_key_id)) => {
+            Some((subject_id, api_key_id)) => {
                 // Remove from api_keys table
                 {
                     let mut table = write_txn.open_table(API_KEYS)?;
@@ -308,8 +308,8 @@ impl Database {
 
                 // Update resource_api_keys index
                 let key_hashes: Option<Vec<String>> = {
-                    let index_table = write_txn.open_table(RESOURCE_API_KEYS)?;
-                    let result = index_table.get(resource_id.as_str())?;
+                    let index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
+                    let result = index_table.get(subject_id.as_str())?;
                     match result {
                         Some(data) => Some(bincode::deserialize(data.value())?),
                         None => None,
@@ -318,12 +318,12 @@ impl Database {
 
                 if let Some(mut hashes) = key_hashes {
                     hashes.retain(|h| h != key_hash);
-                    let mut index_table = write_txn.open_table(RESOURCE_API_KEYS)?;
+                    let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
                     if hashes.is_empty() {
-                        index_table.remove(resource_id.as_str())?;
+                        index_table.remove(subject_id.as_str())?;
                     } else {
                         let new_index_data = bincode::serialize(&hashes)?;
-                        index_table.insert(resource_id.as_str(), new_index_data.as_slice())?;
+                        index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
 
@@ -343,15 +343,12 @@ impl Database {
     }
 
     /// Get all API keys for a resource
-    pub fn get_api_keys_by_resource(
-        &self,
-        resource_id: &str,
-    ) -> Result<Vec<ApiKey>, DatabaseError> {
+    pub fn get_api_keys_by_subject(&self, subject_id: &str) -> Result<Vec<ApiKey>, DatabaseError> {
         let read_txn = self.begin_read()?;
-        let index_table = read_txn.open_table(RESOURCE_API_KEYS)?;
+        let index_table = read_txn.open_table(SUBJECT_API_KEYS)?;
         let keys_table = read_txn.open_table(API_KEYS)?;
 
-        let key_hashes: Vec<String> = match index_table.get(resource_id)? {
+        let key_hashes: Vec<String> = match index_table.get(subject_id)? {
             Some(data) => bincode::deserialize(data.value())?,
             None => return Ok(Vec::new()),
         };
@@ -508,14 +505,14 @@ impl Database {
 
         // Clear resource_sessions index
         {
-            let table = write_txn.open_table(RESOURCE_SESSIONS)?;
+            let table = write_txn.open_table(SUBJECT_SESSIONS)?;
             let keys: Vec<String> = table
                 .iter()?
                 .map(|r| r.map(|(k, _)| k.value().to_string()))
                 .collect::<Result<Vec<_>, _>>()?;
             drop(table);
 
-            let mut table = write_txn.open_table(RESOURCE_SESSIONS)?;
+            let mut table = write_txn.open_table(SUBJECT_SESSIONS)?;
             for key in keys {
                 table.remove(key.as_str())?;
             }

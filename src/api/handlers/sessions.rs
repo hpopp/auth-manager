@@ -20,7 +20,7 @@ use crate::AppState;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateSessionRequest {
-    pub resource_id: String,
+    pub subject_id: String,
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
     #[serde(default)]
@@ -40,7 +40,7 @@ pub struct SessionResponse {
     pub device_info: DeviceInfoResponse,
     pub expires_at: String,
     pub id: String,
-    pub resource_id: String,
+    pub subject_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,7 +81,7 @@ pub async fn create_session(
         device_info,
         expires_at: now + chrono::Duration::seconds(ttl as i64),
         id: uuid::Uuid::new_v4().to_string(),
-        resource_id: req.resource_id.clone(),
+        subject_id: req.subject_id.clone(),
         token: generate_token(),
     };
 
@@ -95,7 +95,7 @@ pub async fn create_session(
         .put_session(&session)
         .map_err(|e| ApiError::internal(format!("Failed to store session: {}", e)))?;
 
-    tracing::debug!(id = %session.id, resource_id = %req.resource_id, "Created session token");
+    tracing::debug!(id = %session.id, subject_id = %req.subject_id, "Created session token");
 
     Ok(JSend::success(CreateSessionResponse {
         expires_at: session.expires_at.to_rfc3339(),
@@ -145,9 +145,9 @@ pub async fn revoke_session(
 
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
-    Path(resource_id): Path<String>,
+    Path(subject_id): Path<String>,
 ) -> Result<Json<JSend<Vec<SessionResponse>>>, ApiError> {
-    match session::list_by_resource(&state.db, &resource_id) {
+    match session::list_by_subject(&state.db, &subject_id) {
         Ok(sessions) => Ok(JSend::success(
             sessions.iter().map(session_to_response).collect(),
         )),
@@ -171,6 +171,6 @@ fn session_to_response(session: &SessionToken) -> SessionResponse {
         },
         expires_at: session.expires_at.to_rfc3339(),
         id: session.id.clone(),
-        resource_id: session.resource_id.clone(),
+        subject_id: session.subject_id.clone(),
     }
 }

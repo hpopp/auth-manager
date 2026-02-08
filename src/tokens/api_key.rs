@@ -21,7 +21,7 @@ pub enum ApiKeyError {
 pub fn create(
     db: &Database,
     name: &str,
-    resource_id: &str,
+    subject_id: &str,
     description: Option<String>,
     expires_in_days: Option<u64>,
     scopes: Vec<String>,
@@ -37,12 +37,12 @@ pub fn create(
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
         name: name.to_string(),
-        resource_id: resource_id.to_string(),
+        subject_id: subject_id.to_string(),
         scopes,
     };
 
     db.put_api_key(&api_key)?;
-    tracing::debug!(key_id = %api_key.id, resource_id = %resource_id, name = %name, "Created API key");
+    tracing::debug!(key_id = %api_key.id, subject_id = %subject_id, name = %name, "Created API key");
 
     Ok((key, api_key))
 }
@@ -78,8 +78,8 @@ pub fn revoke(db: &Database, key: &str) -> Result<bool, ApiKeyError> {
 }
 
 /// List all API keys for a resource
-pub fn list_by_resource(db: &Database, resource_id: &str) -> Result<Vec<ApiKey>, ApiKeyError> {
-    let keys = db.get_api_keys_by_resource(resource_id)?;
+pub fn list_by_subject(db: &Database, subject_id: &str) -> Result<Vec<ApiKey>, ApiKeyError> {
+    let keys = db.get_api_keys_by_subject(subject_id)?;
     let now = Utc::now();
 
     // Filter out expired keys
@@ -130,7 +130,7 @@ mod tests {
         let (key, api_key) = create(&db, "Test Key", "user-123", None, None, vec![]).unwrap();
         assert!(key.starts_with("am_"));
         assert_eq!(api_key.name, "Test Key");
-        assert_eq!(api_key.resource_id, "user-123");
+        assert_eq!(api_key.subject_id, "user-123");
         assert!(api_key.expires_at.is_none());
         assert!(api_key.scopes.is_empty());
 
@@ -158,20 +158,20 @@ mod tests {
     }
 
     #[test]
-    fn test_list_by_resource() {
+    fn test_list_by_subject() {
         let (db, _temp) = setup_db();
 
         create(&db, "Key 1", "user-123", None, None, vec![]).unwrap();
         create(&db, "Key 2", "user-123", None, None, vec![]).unwrap();
         create(&db, "Key 3", "user-456", None, None, vec![]).unwrap();
 
-        let keys = list_by_resource(&db, "user-123").unwrap();
+        let keys = list_by_subject(&db, "user-123").unwrap();
         assert_eq!(keys.len(), 2);
 
-        let keys = list_by_resource(&db, "user-456").unwrap();
+        let keys = list_by_subject(&db, "user-456").unwrap();
         assert_eq!(keys.len(), 1);
 
-        let keys = list_by_resource(&db, "user-999").unwrap();
+        let keys = list_by_subject(&db, "user-999").unwrap();
         assert_eq!(keys.len(), 0);
     }
 

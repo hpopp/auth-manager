@@ -17,7 +17,7 @@ headers {
 body:json {
   {
     "name": "My API Key",
-    "resource_id": "user-123",
+    "subject_id": "user-123",
     "description": "Key for accessing the reporting API",
     "scopes": ["read:reports", "write:reports"],
     "expires_in_days": 365
@@ -39,7 +39,7 @@ docs {
   | Field | Type | Required | Description |
   |-------|------|----------|-------------|
   | name | string | Yes | Human-readable name for the key |
-  | resource_id | string | Yes | Identifier for the resource owning this key |
+  | subject_id | string | Yes | Identifier for the subject (actor) owning this key |
   | description | string | No | Description of the key's purpose |
   | scopes | string[] | No | Permission scopes granted to this key (default: []) |
   | expires_in_days | number | No | Days until expiration (null = never expires) |
@@ -55,7 +55,7 @@ docs {
       "id": "550e8400-e29b-41d4-a716-446655440000",
       "key": "am_abc123...",
       "name": "My API Key",
-      "resource_id": "user-123",
+      "subject_id": "user-123",
       "scopes": ["read:reports", "write:reports"]
     }
   }

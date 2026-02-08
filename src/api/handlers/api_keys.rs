@@ -27,7 +27,7 @@ pub struct CreateApiKeyRequest {
     #[serde(default)]
     pub expires_in_days: Option<u64>,
     pub name: String,
-    pub resource_id: String,
+    pub subject_id: String,
     #[serde(default)]
     pub scopes: Vec<String>,
 }
@@ -39,7 +39,7 @@ pub struct CreateApiKeyResponse {
     pub id: String,
     pub key: String,
     pub name: String,
-    pub resource_id: String,
+    pub subject_id: String,
     pub scopes: Vec<String>,
 }
 
@@ -50,7 +50,7 @@ pub struct ApiKeyResponse {
     pub expires_at: Option<String>,
     pub id: String,
     pub name: String,
-    pub resource_id: String,
+    pub subject_id: String,
     pub scopes: Vec<String>,
 }
 
@@ -80,7 +80,7 @@ pub async fn create_api_key(
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
         name: req.name.clone(),
-        resource_id: req.resource_id.clone(),
+        subject_id: req.subject_id.clone(),
         scopes: req.scopes.clone(),
     };
 
@@ -102,7 +102,7 @@ pub async fn create_api_key(
         id: api_key_record.id,
         key,
         name: api_key_record.name,
-        resource_id: api_key_record.resource_id,
+        subject_id: api_key_record.subject_id,
         scopes: api_key_record.scopes,
     }))
 }
@@ -148,9 +148,9 @@ pub async fn revoke_api_key(
 
 pub async fn list_api_keys(
     State(state): State<Arc<AppState>>,
-    Path(resource_id): Path<String>,
+    Path(subject_id): Path<String>,
 ) -> Result<Json<JSend<Vec<ApiKeyResponse>>>, ApiError> {
-    match api_key::list_by_resource(&state.db, &resource_id) {
+    match api_key::list_by_subject(&state.db, &subject_id) {
         Ok(keys) => Ok(JSend::success(
             keys.iter().map(api_key_to_response).collect(),
         )),
@@ -169,7 +169,7 @@ fn api_key_to_response(api_key: &ApiKeyModel) -> ApiKeyResponse {
         expires_at: api_key.expires_at.map(|t| t.to_rfc3339()),
         id: api_key.id.clone(),
         name: api_key.name.clone(),
-        resource_id: api_key.resource_id.clone(),
+        subject_id: api_key.subject_id.clone(),
         scopes: api_key.scopes.clone(),
     }
 }

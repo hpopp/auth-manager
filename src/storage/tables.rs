@@ -12,13 +12,11 @@ pub const REPLICATION_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("r
 /// Node state: "state" -> NodeState (bincode)
 pub const NODE_META: TableDefinition<&str, &[u8]> = TableDefinition::new("node_meta");
 
-/// Secondary index: resource_id -> Vec<key_hash> (for listing API keys by resource)
-pub const RESOURCE_API_KEYS: TableDefinition<&str, &[u8]> =
-    TableDefinition::new("resource_api_keys");
+/// Secondary index: subject_id -> Vec<key_hash> (for listing API keys by subject)
+pub const SUBJECT_API_KEYS: TableDefinition<&str, &[u8]> = TableDefinition::new("subject_api_keys");
 
-/// Secondary index: resource_id -> Vec<token> (for listing sessions by resource)
-pub const RESOURCE_SESSIONS: TableDefinition<&str, &[u8]> =
-    TableDefinition::new("resource_sessions");
+/// Secondary index: subject_id -> Vec<token> (for listing sessions by subject)
+pub const SUBJECT_SESSIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("subject_sessions");
 
 /// Secondary index: session UUID id -> token (for revoking sessions by ID)
 pub const SESSION_IDS: TableDefinition<&str, &str> = TableDefinition::new("session_ids");

@@ -34,8 +34,8 @@ pub struct SessionToken {
     pub expires_at: DateTime<Utc>,
     /// Non-secret UUID identifier (used for listing, revoking)
     pub id: String,
-    /// Generic owner (user, service, device, etc.)
-    pub resource_id: String,
+    /// The actor (user, service, device, etc.)
+    pub subject_id: String,
     /// Opaque secret token (32-byte hex, used for verification)
     pub token: String,
 }
@@ -55,8 +55,8 @@ pub struct ApiKey {
     pub key_hash: String,
     /// Human-readable name for the key
     pub name: String,
-    /// Generic owner (user, service, device, etc.)
-    pub resource_id: String,
+    /// The actor (user, service, device, etc.)
+    pub subject_id: String,
     /// Permission scopes granted to this key
     pub scopes: Vec<String>,
 }

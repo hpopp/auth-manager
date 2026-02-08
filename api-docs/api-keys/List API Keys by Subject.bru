@@ -1,25 +1,25 @@
 meta {
-  name: List API Keys by Resource
+  name: List API Keys by Subject
   type: http
   seq: 4
 }
 
 get {
-  url: {{baseUrl}}/api-keys/resource/user-123
+  url: {{baseUrl}}/api-keys/subject/user-123
   body: none
   auth: none
 }
 
 docs {
-  # List API Keys by Resource
+  # List API Keys by Subject
   
-  Lists all active (non-expired) API keys for a given resource ID.
+  Lists all active (non-expired) API keys for a given subject ID.
   
   ## Path Parameters
   
   | Parameter | Description |
   |-----------|-------------|
-  | resource_id | The resource identifier to list API keys for |
+  | subject_id | The subject identifier to list API keys for |
   
   ## Response
   
@@ -33,7 +33,7 @@ docs {
         "expires_at": "2027-02-08T10:00:00Z",
         "id": "550e8400-e29b-41d4-a716-446655440000",
         "name": "My API Key",
-        "resource_id": "user-123",
+        "subject_id": "user-123",
         "scopes": ["read:reports", "write:reports"]
       }
     ]
@@ -42,5 +42,5 @@ docs {
   
   Note: The actual key value is never returned. Only key metadata is listed.
   
-  Returns an empty array if no API keys exist for the resource.
+  Returns an empty array if no API keys exist for the subject.
 }
