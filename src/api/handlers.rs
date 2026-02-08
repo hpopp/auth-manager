@@ -10,24 +10,31 @@ use std::sync::Arc;
 use crate::cluster::{replicate_write, ReplicationError, Role};
 use crate::device::parse_user_agent;
 use crate::storage::models::{ApiKey as ApiKeyModel, ReplicatedWrite, SessionToken, WriteOp};
-use crate::tokens::{api_key, generator::{generate_api_key, generate_token, hash_key}, session};
+use crate::tokens::{
+    api_key,
+    generator::{generate_api_key, generate_token, hash_key},
+    session,
+};
 use crate::AppState;
 
-use super::response::{ApiError, JSend};
+use super::response::{ApiError, JSend, JSendFail};
 
 // ============================================================================
 // Leader forwarding helper
 // ============================================================================
 
 /// Forward a JSON request to the leader node
-async fn forward_to_leader<T: serde::Serialize, R: serde::de::DeserializeOwned>(
+async fn forward_to_leader<
+    T: serde::Serialize,
+    R: serde::Serialize + serde::de::DeserializeOwned,
+>(
     state: &Arc<AppState>,
     method: &str,
     path: &str,
     body: Option<&T>,
 ) -> Result<R, ApiError> {
     let cluster = state.cluster.read().await;
-    
+
     let leader_addr = cluster.get_leader_address().ok_or_else(|| {
         ApiError::unavailable("Leader unknown. Cluster may be electing a new leader.")
     })?;
@@ -36,12 +43,10 @@ async fn forward_to_leader<T: serde::Serialize, R: serde::de::DeserializeOwned>(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| {
-            ApiError::internal(format!("Failed to create HTTP client: {}", e))
-        })?;
+        .map_err(|e| ApiError::internal(format!("Failed to create HTTP client: {}", e)))?;
 
     let url = format!("http://{}{}", leader_addr, path);
-    
+
     let request_builder = match method {
         "POST" => client.post(&url),
         "DELETE" => client.delete(&url),
@@ -60,15 +65,22 @@ async fn forward_to_leader<T: serde::Serialize, R: serde::de::DeserializeOwned>(
     })?;
 
     let status = response.status();
-    
+
     if status.is_success() {
-        response.json::<R>().await.map_err(|e| {
-            ApiError::internal(format!("Failed to parse leader response: {}", e))
-        })
+        // Leader returns JSend-wrapped responses; unwrap the envelope
+        let envelope = response
+            .json::<JSend<R>>()
+            .await
+            .map_err(|e| ApiError::internal(format!("Failed to parse leader response: {}", e)))?;
+        Ok(envelope.data)
     } else {
-        let error_msg = response.text().await
+        // Try to parse a JSend fail/error response from leader
+        let error_msg = response
+            .json::<JSendFail>()
+            .await
+            .map(|f| f.data.message)
             .unwrap_or_else(|_| format!("Leader returned status: {}", status));
-        
+
         Err(ApiError::from_status(
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             error_msg,
@@ -77,12 +89,9 @@ async fn forward_to_leader<T: serde::Serialize, R: serde::de::DeserializeOwned>(
 }
 
 /// Forward a DELETE request to the leader (expects no body in response)
-async fn forward_delete_to_leader(
-    state: &Arc<AppState>,
-    path: &str,
-) -> Result<(), ApiError> {
+async fn forward_delete_to_leader(state: &Arc<AppState>, path: &str) -> Result<(), ApiError> {
     let cluster = state.cluster.read().await;
-    
+
     let leader_addr = cluster.get_leader_address().ok_or_else(|| {
         ApiError::unavailable("Leader unknown. Cluster may be electing a new leader.")
     })?;
@@ -91,24 +100,24 @@ async fn forward_delete_to_leader(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| {
-            ApiError::internal(format!("Failed to create HTTP client: {}", e))
-        })?;
+        .map_err(|e| ApiError::internal(format!("Failed to create HTTP client: {}", e)))?;
 
     let url = format!("http://{}{}", leader_addr, path);
-    
+
     let response = client.delete(&url).send().await.map_err(|e| {
         ApiError::bad_gateway(format!("Failed to forward request to leader: {}", e))
     })?;
 
     let status = response.status();
-    
+
     if status.is_success() {
         Ok(())
     } else {
-        let error_msg = response.text().await
+        let error_msg = response
+            .text()
+            .await
             .unwrap_or_else(|_| format!("Leader returned status: {}", status));
-        
+
         Err(ApiError::from_status(
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             error_msg,
@@ -289,7 +298,8 @@ pub async fn create_session(
         let cluster = state.cluster.read().await;
         if cluster.role != Role::Leader {
             drop(cluster);
-            let response: CreateSessionResponse = forward_to_leader(&state, "POST", "/sessions", Some(&req)).await?;
+            let response: CreateSessionResponse =
+                forward_to_leader(&state, "POST", "/sessions", Some(&req)).await?;
             return Ok(JSend::success(response));
         }
     }
@@ -316,15 +326,18 @@ pub async fn create_session(
 
     // Replicate to cluster (includes local write)
     let operation = WriteOp::CreateSession(session.clone());
-    replicate_write(Arc::clone(&state), operation).await.map_err(replication_error)?;
+    replicate_write(Arc::clone(&state), operation)
+        .await
+        .map_err(replication_error)?;
 
     // Apply locally after successful replication
-    state.db.put_session(&session).map_err(|e| {
-        ApiError::internal(format!("Failed to store session: {}", e))
-    })?;
-    
+    state
+        .db
+        .put_session(&session)
+        .map_err(|e| ApiError::internal(format!("Failed to store session: {}", e)))?;
+
     tracing::debug!(token_id = %session.id, resource_id = %req.resource_id, "Created session token");
-    
+
     Ok(JSend::success(CreateSessionResponse {
         token: session.id,
         expires_at: session.expires_at.to_rfc3339(),
@@ -365,14 +378,19 @@ pub async fn revoke_session(
     }
 
     // Replicate revocation to cluster
-    let operation = WriteOp::RevokeSession { token_id: token.clone() };
-    replicate_write(Arc::clone(&state), operation).await.map_err(replication_error)?;
+    let operation = WriteOp::RevokeSession {
+        token_id: token.clone(),
+    };
+    replicate_write(Arc::clone(&state), operation)
+        .await
+        .map_err(replication_error)?;
 
     // Apply locally after successful replication
-    state.db.delete_session(&token).map_err(|e| {
-        ApiError::internal(format!("Failed to delete session: {}", e))
-    })?;
-    
+    state
+        .db
+        .delete_session(&token)
+        .map_err(|e| ApiError::internal(format!("Failed to delete session: {}", e)))?;
+
     tracing::debug!(token_id = %token, "Revoked session token");
     Ok(JSend::success(()))
 }
@@ -382,7 +400,9 @@ pub async fn list_sessions(
     Path(resource_id): Path<String>,
 ) -> Result<Json<JSend<Vec<SessionResponse>>>, ApiError> {
     match session::list_by_resource(&state.db, &resource_id) {
-        Ok(sessions) => Ok(JSend::success(sessions.iter().map(session_to_response).collect())),
+        Ok(sessions) => Ok(JSend::success(
+            sessions.iter().map(session_to_response).collect(),
+        )),
         Err(e) => Err(ApiError::internal(e.to_string())),
     }
 }
@@ -400,7 +420,8 @@ pub async fn create_api_key(
         let cluster = state.cluster.read().await;
         if cluster.role != Role::Leader {
             drop(cluster);
-            let response: CreateApiKeyResponse = forward_to_leader(&state, "POST", "/api-keys", Some(&req)).await?;
+            let response: CreateApiKeyResponse =
+                forward_to_leader(&state, "POST", "/api-keys", Some(&req)).await?;
             return Ok(JSend::success(response));
         }
     }
@@ -409,10 +430,12 @@ pub async fn create_api_key(
     let key = generate_api_key();
     let key_hash = hash_key(&key);
     let now = Utc::now();
-    
+
     let api_key_record = ApiKeyModel {
         created_at: now,
-        expires_at: req.expires_in_days.map(|days| now + chrono::Duration::days(days as i64)),
+        expires_at: req
+            .expires_in_days
+            .map(|days| now + chrono::Duration::days(days as i64)),
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
         name: req.name.clone(),
@@ -421,15 +444,18 @@ pub async fn create_api_key(
 
     // Replicate to cluster
     let operation = WriteOp::CreateApiKey(api_key_record.clone());
-    replicate_write(Arc::clone(&state), operation).await.map_err(replication_error)?;
+    replicate_write(Arc::clone(&state), operation)
+        .await
+        .map_err(replication_error)?;
 
     // Apply locally after successful replication
-    state.db.put_api_key(&api_key_record).map_err(|e| {
-        ApiError::internal(format!("Failed to store API key: {}", e))
-    })?;
-    
+    state
+        .db
+        .put_api_key(&api_key_record)
+        .map_err(|e| ApiError::internal(format!("Failed to store API key: {}", e)))?;
+
     tracing::debug!(key_id = %api_key_record.id, name = %req.name, "Created API key");
-    
+
     Ok(JSend::success(CreateApiKeyResponse {
         expires_at: api_key_record.expires_at.map(|t| t.to_rfc3339()),
         id: api_key_record.id,
@@ -474,14 +500,19 @@ pub async fn revoke_api_key(
     }
 
     // Replicate revocation to cluster
-    let operation = WriteOp::RevokeApiKey { key_id: key_hash.clone() };
-    replicate_write(Arc::clone(&state), operation).await.map_err(replication_error)?;
+    let operation = WriteOp::RevokeApiKey {
+        key_id: key_hash.clone(),
+    };
+    replicate_write(Arc::clone(&state), operation)
+        .await
+        .map_err(replication_error)?;
 
     // Apply locally after successful replication
-    state.db.delete_api_key(&key_hash).map_err(|e| {
-        ApiError::internal(format!("Failed to delete API key: {}", e))
-    })?;
-    
+    state
+        .db
+        .delete_api_key(&key_hash)
+        .map_err(|e| ApiError::internal(format!("Failed to delete API key: {}", e)))?;
+
     tracing::debug!(key_hash = %key_hash, "Revoked API key");
     Ok(JSend::success(()))
 }
@@ -491,7 +522,9 @@ pub async fn list_api_keys(
     Path(resource_id): Path<String>,
 ) -> Result<Json<JSend<Vec<ApiKeyResponse>>>, ApiError> {
     match api_key::list_by_resource(&state.db, &resource_id) {
-        Ok(keys) => Ok(JSend::success(keys.iter().map(api_key_to_response).collect())),
+        Ok(keys) => Ok(JSend::success(
+            keys.iter().map(api_key_to_response).collect(),
+        )),
         Err(e) => Err(ApiError::internal(e.to_string())),
     }
 }
@@ -524,9 +557,11 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<JSend<HealthResp
     })
 }
 
-pub async fn cluster_status(State(state): State<Arc<AppState>>) -> Json<JSend<ClusterStatusResponse>> {
+pub async fn cluster_status(
+    State(state): State<Arc<AppState>>,
+) -> Json<JSend<ClusterStatusResponse>> {
     let cluster = state.cluster.read().await;
-    
+
     JSend::success(ClusterStatusResponse {
         cluster_size: cluster.cluster_size(),
         node_id: state.config.node.id.clone(),
@@ -578,7 +613,7 @@ pub async fn internal_replicate(
     Json(req): Json<ReplicateRequest>,
 ) -> Result<Json<ReplicateResponse>, ApiError> {
     let mut cluster = state.cluster.write().await;
-    
+
     // Verify term - reject if our term is higher
     if req.term < cluster.current_term {
         return Ok(Json(ReplicateResponse {
@@ -586,15 +621,15 @@ pub async fn internal_replicate(
             sequence: cluster.last_applied_sequence,
         }));
     }
-    
+
     // Update term and recognize leader if needed
     if req.term > cluster.current_term {
         cluster.become_follower(req.term, Some(req.leader_id.clone()));
     }
-    
+
     cluster.update_heartbeat();
     drop(cluster);
-    
+
     // Apply the operation locally
     match apply_write_op(&state.db, &req.operation) {
         Ok(()) => {
@@ -604,18 +639,21 @@ pub async fn internal_replicate(
                 operation: req.operation,
                 timestamp: Utc::now(),
             };
-            
+
             if let Err(e) = state.db.append_replication_log(&write) {
                 tracing::error!(error = %e, "Failed to append to replication log");
-                return Err(ApiError::internal(format!("Failed to append to replication log: {}", e)));
+                return Err(ApiError::internal(format!(
+                    "Failed to append to replication log: {}",
+                    e
+                )));
             }
-            
+
             // Update applied sequence
             let mut cluster = state.cluster.write().await;
             cluster.last_applied_sequence = req.sequence;
-            
+
             tracing::debug!(sequence = req.sequence, "Applied replicated write");
-            
+
             Ok(Json(ReplicateResponse {
                 success: true,
                 sequence: req.sequence,
@@ -629,7 +667,10 @@ pub async fn internal_replicate(
 }
 
 /// Apply a write operation to the local database
-fn apply_write_op(db: &crate::storage::Database, op: &WriteOp) -> Result<(), crate::storage::DatabaseError> {
+fn apply_write_op(
+    db: &crate::storage::Database,
+    op: &WriteOp,
+) -> Result<(), crate::storage::DatabaseError> {
     match op {
         WriteOp::CreateSession(session) => {
             db.put_session(session)?;
@@ -656,7 +697,7 @@ pub async fn internal_heartbeat(
     Json(req): Json<HeartbeatRequest>,
 ) -> Json<HeartbeatResponse> {
     let mut cluster = state.cluster.write().await;
-    
+
     // If term is less than ours, reject
     if req.term < cluster.current_term {
         return Json(HeartbeatResponse {
@@ -665,21 +706,21 @@ pub async fn internal_heartbeat(
             sequence: cluster.last_applied_sequence,
         });
     }
-    
+
     // Accept the heartbeat - step down if we thought we were leader
     if req.term > cluster.current_term || cluster.role != Role::Follower {
         cluster.become_follower(req.term, Some(req.leader_id.clone()));
     }
-    
+
     cluster.leader_id = Some(req.leader_id);
     if let Some(addr) = req.leader_address {
         cluster.leader_address = Some(addr);
     }
     cluster.update_heartbeat();
-    
+
     let sequence = cluster.last_applied_sequence;
     let term = cluster.current_term;
-    
+
     Json(HeartbeatResponse {
         term,
         success: true,
@@ -696,7 +737,7 @@ pub async fn internal_vote(
     Json(req): Json<VoteRequest>,
 ) -> Json<VoteResponse> {
     let mut cluster = state.cluster.write().await;
-    
+
     // If candidate's term is less than ours, reject
     if req.term < cluster.current_term {
         return Json(VoteResponse {
@@ -704,28 +745,28 @@ pub async fn internal_vote(
             vote_granted: false,
         });
     }
-    
+
     // If candidate's term is greater, become follower
     if req.term > cluster.current_term {
         cluster.become_follower(req.term, None);
     }
-    
+
     // Grant vote if we haven't voted yet in this term (or already voted for this candidate)
     let dominated_log = req.last_sequence >= cluster.last_applied_sequence;
-    let grant = dominated_log && 
-        (cluster.voted_for.is_none() || cluster.voted_for.as_deref() == Some(&req.candidate_id));
-    
+    let grant = dominated_log
+        && (cluster.voted_for.is_none() || cluster.voted_for.as_deref() == Some(&req.candidate_id));
+
     if grant {
         cluster.voted_for = Some(req.candidate_id.clone());
         cluster.update_heartbeat(); // Reset election timeout
-        
+
         if let Err(e) = cluster.persist(&state.db, &state.config.node.id) {
             tracing::warn!(error = %e, "Failed to persist vote");
         }
-        
+
         tracing::debug!(candidate = %req.candidate_id, term = req.term, "Granted vote");
     }
-    
+
     Json(VoteResponse {
         term: cluster.current_term,
         vote_granted: grant,

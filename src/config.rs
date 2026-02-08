@@ -84,11 +84,11 @@ fn default_data_dir() -> String {
 }
 
 fn default_heartbeat_interval_ms() -> u64 {
-    150  // Send heartbeat every 150ms
+    150 // Send heartbeat every 150ms
 }
 
 fn default_election_timeout_ms() -> u64 {
-    1500  // Wait 1.5s before triggering election (more forgiving for Docker networking)
+    1500 // Wait 1.5s before triggering election (more forgiving for Docker networking)
 }
 
 fn default_log_retention_entries() -> u64 {
@@ -147,8 +147,8 @@ impl Config {
     /// Load configuration from file or environment
     pub fn load() -> Result<Self, ConfigError> {
         // Try to load from config.toml in current directory
-        let config_path = std::env::var("AUTH_MANAGER_CONFIG")
-            .unwrap_or_else(|_| "config.toml".to_string());
+        let config_path =
+            std::env::var("AUTH_MANAGER_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
 
         if Path::new(&config_path).exists() {
             let contents = fs::read_to_string(&config_path)?;
@@ -159,12 +159,12 @@ impl Config {
             // Use defaults with node ID from environment or generate one
             let node_id = std::env::var("AUTH_MANAGER_NODE_ID")
                 .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-            
+
             let bind_address = std::env::var("AUTH_MANAGER_BIND_ADDRESS")
                 .unwrap_or_else(|_| default_bind_address());
-            
-            let data_dir = std::env::var("AUTH_MANAGER_DATA_DIR")
-                .unwrap_or_else(|_| default_data_dir());
+
+            let data_dir =
+                std::env::var("AUTH_MANAGER_DATA_DIR").unwrap_or_else(|_| default_data_dir());
 
             let peers: Vec<String> = std::env::var("AUTH_MANAGER_PEERS")
                 .map(|p| {
@@ -218,7 +218,9 @@ impl Config {
     /// Validate the configuration
     fn validate(&self) -> Result<(), ConfigError> {
         if self.node.id.is_empty() {
-            return Err(ConfigError::ValidationError("node.id cannot be empty".to_string()));
+            return Err(ConfigError::ValidationError(
+                "node.id cannot be empty".to_string(),
+            ));
         }
 
         let cluster_size = self.cluster.peers.len() + 1;

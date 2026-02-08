@@ -9,15 +9,15 @@ use crate::AppState;
 /// Start the background expiration cleaner task
 pub fn start_expiration_cleaner(state: Arc<AppState>) -> JoinHandle<()> {
     let interval = Duration::from_secs(state.config.tokens.cleanup_interval_seconds);
-    
+
     tokio::spawn(async move {
         let mut interval_timer = tokio::time::interval(interval);
-        
+
         loop {
             interval_timer.tick().await;
-            
+
             debug!("Running expiration cleanup");
-            
+
             // Clean up expired sessions
             match session::cleanup_expired(&state.db) {
                 Ok(count) => {
@@ -29,7 +29,7 @@ pub fn start_expiration_cleaner(state: Arc<AppState>) -> JoinHandle<()> {
                     error!(error = %e, "Failed to clean up expired sessions");
                 }
             }
-            
+
             // Clean up expired API keys
             match api_key::cleanup_expired(&state.db) {
                 Ok(count) => {

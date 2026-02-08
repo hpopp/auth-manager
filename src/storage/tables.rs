@@ -13,7 +13,9 @@ pub const REPLICATION_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("r
 pub const NODE_META: TableDefinition<&str, &[u8]> = TableDefinition::new("node_meta");
 
 /// Secondary index: resource_id -> Vec<key_hash> (for listing API keys by resource)
-pub const RESOURCE_API_KEYS: TableDefinition<&str, &[u8]> = TableDefinition::new("resource_api_keys");
+pub const RESOURCE_API_KEYS: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("resource_api_keys");
 
 /// Secondary index: resource_id -> Vec<token_id> (for listing sessions by resource)
-pub const RESOURCE_SESSIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("resource_sessions");
+pub const RESOURCE_SESSIONS: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("resource_sessions");

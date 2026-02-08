@@ -18,7 +18,7 @@ pub fn generate_api_key() -> String {
 pub fn hash_key(key: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    
+
     // Simple hash for now - in production, use a proper cryptographic hash
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
@@ -33,7 +33,7 @@ mod tests {
     fn test_generate_token() {
         let token = generate_token();
         assert_eq!(token.len(), 64); // 32 bytes * 2 hex chars
-        
+
         // Ensure randomness
         let token2 = generate_token();
         assert_ne!(token, token2);
@@ -52,7 +52,7 @@ mod tests {
         let hash1 = hash_key(key);
         let hash2 = hash_key(key);
         assert_eq!(hash1, hash2); // Deterministic
-        
+
         let hash3 = hash_key("different_key");
         assert_ne!(hash1, hash3); // Different inputs produce different hashes
     }

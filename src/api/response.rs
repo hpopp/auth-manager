@@ -1,22 +1,34 @@
 use axum::http::StatusCode;
 use axum::Json;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+// ============================================================================
+// JSend status enum
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JSendStatus {
+    Error,
+    Fail,
+    Success,
+}
 
 // ============================================================================
 // JSend success envelope
 // ============================================================================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct JSend<T: Serialize> {
     pub data: T,
-    pub status: &'static str,
+    pub status: JSendStatus,
 }
 
 impl<T: Serialize> JSend<T> {
     pub fn success(data: T) -> Json<JSend<T>> {
         Json(JSend {
             data,
-            status: "success",
+            status: JSendStatus::Success,
         })
     }
 }
@@ -28,7 +40,7 @@ impl<T: Serialize> JSend<T> {
 #[derive(Debug, Serialize)]
 pub struct JSendPaginated<T: Serialize> {
     pub data: PaginatedData<T>,
-    pub status: &'static str,
+    pub status: JSendStatus,
 }
 
 #[derive(Debug, Serialize)]
@@ -48,7 +60,7 @@ impl<T: Serialize> JSendPaginated<T> {
     pub fn success(items: Vec<T>, pagination: Pagination) -> Json<JSendPaginated<T>> {
         Json(JSendPaginated {
             data: PaginatedData { items, pagination },
-            status: "success",
+            status: JSendStatus::Success,
         })
     }
 }
@@ -57,13 +69,13 @@ impl<T: Serialize> JSendPaginated<T> {
 // JSend fail envelope (client errors, 4xx)
 // ============================================================================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct JSendFail {
     pub data: FailData,
-    pub status: &'static str,
+    pub status: JSendStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FailData {
     pub message: String,
 }
@@ -79,7 +91,7 @@ impl JSendFail {
                 data: FailData {
                     message: message.into(),
                 },
-                status: "fail",
+                status: JSendStatus::Fail,
             }),
         )
     }
@@ -97,10 +109,10 @@ impl JSendFail {
 // JSend error envelope (server errors, 5xx)
 // ============================================================================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct JSendError {
     pub message: String,
-    pub status: &'static str,
+    pub status: JSendStatus,
 }
 
 impl JSendError {
@@ -112,7 +124,7 @@ impl JSendError {
             status_code,
             Json(JSendError {
                 message: message.into(),
-                status: "error",
+                status: JSendStatus::Error,
             }),
         )
     }

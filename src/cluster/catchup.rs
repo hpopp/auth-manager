@@ -34,37 +34,34 @@ pub struct Snapshot {
 }
 
 /// Request sync from the leader
-pub async fn request_sync(
-    state: Arc<AppState>,
-    leader_addr: &str,
-) -> Result<(), CatchupError> {
+pub async fn request_sync(state: Arc<AppState>, leader_addr: &str) -> Result<(), CatchupError> {
     let my_sequence = {
         let cluster = state.cluster.read().await;
         cluster.last_applied_sequence
     };
-    
+
     info!(my_sequence, leader = %leader_addr, "Requesting sync from leader");
-    
+
     // Request sync from leader
     let response = send_sync_request(leader_addr, my_sequence).await?;
-    
+
     // Apply snapshot if provided
     if let Some(snapshot) = response.snapshot {
         apply_snapshot(&state.db, &snapshot)?;
         info!(sequence = snapshot.sequence, "Applied snapshot");
     }
-    
+
     // Apply log entries
     for entry in response.log_entries {
         apply_log_entry(&state.db, &entry)?;
     }
-    
+
     // Update our sequence
     {
         let mut cluster = state.cluster.write().await;
         cluster.last_applied_sequence = response.leader_sequence;
     }
-    
+
     info!(sequence = response.leader_sequence, "Sync complete");
     Ok(())
 }
@@ -76,12 +73,12 @@ async fn send_sync_request(
 ) -> Result<SyncResponse, CatchupError> {
     // TODO: Implement actual RPC call to leader
     // For now, return empty response
-    
+
     // In a real implementation, this would:
     // 1. Connect to leader_addr
     // 2. Send SyncRequest with from_sequence
     // 3. Receive snapshot (if far behind) + log entries
-    
+
     Ok(SyncResponse {
         snapshot: None,
         log_entries: Vec::new(),
@@ -95,18 +92,18 @@ fn apply_snapshot(db: &Database, snapshot: &Snapshot) -> Result<(), CatchupError
     for session in &snapshot.sessions {
         db.put_session(session)?;
     }
-    
+
     // Apply API keys
     for api_key in &snapshot.api_keys {
         db.put_api_key(api_key)?;
     }
-    
+
     debug!(
         sessions = snapshot.sessions.len(),
         api_keys = snapshot.api_keys.len(),
         "Snapshot applied"
     );
-    
+
     Ok(())
 }
 
@@ -126,32 +123,35 @@ fn apply_log_entry(db: &Database, entry: &ReplicatedWrite) -> Result<(), Catchup
             db.delete_api_key(key_id)?;
         }
     }
-    
+
     // Record in replication log
     db.append_replication_log(entry)?;
-    
+
     Ok(())
 }
 
 /// Handle a sync request from a follower (leader only)
-pub async fn handle_sync_request(state: Arc<AppState>, from_sequence: u64) -> Result<SyncResponse, CatchupError> {
+pub async fn handle_sync_request(
+    state: Arc<AppState>,
+    from_sequence: u64,
+) -> Result<SyncResponse, CatchupError> {
     let leader_sequence = state.db.get_latest_sequence()?;
-    
+
     // If follower is far behind, send a snapshot
     let snapshot = if from_sequence == 0 || (leader_sequence - from_sequence) > 10000 {
         Some(create_snapshot(&state.db)?)
     } else {
         None
     };
-    
+
     // Get log entries from follower's sequence
     let start_sequence = snapshot
         .as_ref()
         .map(|s| s.sequence + 1)
         .unwrap_or(from_sequence + 1);
-    
+
     let log_entries = state.db.get_replication_log_from(start_sequence)?;
-    
+
     Ok(SyncResponse {
         snapshot,
         log_entries,
@@ -164,7 +164,7 @@ fn create_snapshot(db: &Database) -> Result<Snapshot, CatchupError> {
     let sequence = db.get_latest_sequence()?;
     let sessions = db.get_all_sessions()?;
     let api_keys = db.get_all_api_keys()?;
-    
+
     Ok(Snapshot {
         sequence,
         sessions,

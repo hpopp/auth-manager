@@ -48,7 +48,11 @@ impl DnsPoll {
         } else {
             warn!(dns_name = %dns_name, "DNS discovery initialized (could not detect local IP)");
         }
-        Self { dns_name, port, local_ip }
+        Self {
+            dns_name,
+            port,
+            local_ip,
+        }
     }
 
     async fn discover(&self) -> anyhow::Result<Vec<SocketAddr>> {
@@ -136,10 +140,7 @@ pub fn compute_advertise_address(bind_address: &str) -> String {
         return addr;
     }
 
-    let port = bind_address
-        .rsplit(':')
-        .next()
-        .unwrap_or("8080");
+    let port = bind_address.rsplit(':').next().unwrap_or("8080");
 
     if let Some(ip) = detect_local_ip() {
         format!("{}:{}", ip, port)

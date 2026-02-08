@@ -34,7 +34,7 @@ pub fn create(
 
     db.put_session(&session)?;
     tracing::debug!(token_id = %session.id, resource_id = %resource_id, "Created session token");
-    
+
     Ok(session)
 }
 
@@ -65,10 +65,13 @@ pub fn revoke(db: &Database, token_id: &str) -> Result<bool, SessionError> {
 }
 
 /// List all sessions for a resource
-pub fn list_by_resource(db: &Database, resource_id: &str) -> Result<Vec<SessionToken>, SessionError> {
+pub fn list_by_resource(
+    db: &Database,
+    resource_id: &str,
+) -> Result<Vec<SessionToken>, SessionError> {
     let sessions = db.get_sessions_by_resource(resource_id)?;
     let now = Utc::now();
-    
+
     // Filter out expired sessions
     Ok(sessions
         .into_iter()
@@ -111,7 +114,7 @@ mod tests {
     #[test]
     fn test_create_and_validate_session() {
         let (db, _temp) = setup_db();
-        
+
         let session = create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
         assert!(!session.id.is_empty());
         assert_eq!(session.resource_id, "user123");
@@ -124,9 +127,9 @@ mod tests {
     #[test]
     fn test_revoke_session() {
         let (db, _temp) = setup_db();
-        
+
         let session = create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
-        
+
         assert!(revoke(&db, &session.id).unwrap());
         assert!(validate(&db, &session.id).unwrap().is_none());
     }
@@ -134,7 +137,7 @@ mod tests {
     #[test]
     fn test_list_by_resource() {
         let (db, _temp) = setup_db();
-        
+
         create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
         create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
         create(&db, "user456", DeviceInfo::default(), 3600).unwrap();

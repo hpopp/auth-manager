@@ -181,9 +181,7 @@ impl ClusterState {
     /// Adds newly discovered peers and removes peers that are no longer
     /// reported by discovery (e.g., removed from DNS).
     pub fn update_discovered_peers(&mut self, addrs: Vec<SocketAddr>) {
-        let discovered: HashSet<String> = addrs.iter()
-            .map(|a| a.to_string())
-            .collect();
+        let discovered: HashSet<String> = addrs.iter().map(|a| a.to_string()).collect();
 
         // Add newly discovered peers
         for addr_str in &discovered {
@@ -202,7 +200,9 @@ impl ClusterState {
         }
 
         // Remove peers that are no longer in discovery results
-        let removed: Vec<String> = self.peer_states.keys()
+        let removed: Vec<String> = self
+            .peer_states
+            .keys()
             .filter(|k| !discovered.contains(*k))
             .cloned()
             .collect();

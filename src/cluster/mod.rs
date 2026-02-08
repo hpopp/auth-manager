@@ -5,9 +5,9 @@ mod heartbeat;
 mod node;
 mod replication;
 
+pub use discovery::Discovery;
 pub use node::{ClusterState, PeerState, Role};
 pub use replication::{replicate_write, ReplicationError};
-pub use discovery::Discovery;
 
 use std::sync::Arc;
 use std::time::Duration;

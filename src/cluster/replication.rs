@@ -1,15 +1,15 @@
 //! Quorum-based replication for write operations
 
-use std::sync::Arc;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, warn};
 
+use super::node::Role;
 use crate::storage::models::{ReplicatedWrite, WriteOp};
 use crate::storage::Database;
 use crate::AppState;
-use super::node::Role;
 
 #[derive(Debug, Error)]
 pub enum ReplicationError {
@@ -43,11 +43,13 @@ pub async fn replicate_write(
 
     // Append to local log
     let sequence = append_to_log(&state.db, operation.clone())?;
-    
+
     // Gather cluster info in a single lock acquisition
     let (peers, leader_id, term, quorum_size) = {
         let cluster = state.cluster.read().await;
-        let peers: Vec<_> = cluster.peer_states.iter()
+        let peers: Vec<_> = cluster
+            .peer_states
+            .iter()
             .map(|(id, p)| (id.clone(), p.address.clone()))
             .collect();
         let leader_id = state.config.node.id.clone();
@@ -57,14 +59,14 @@ pub async fn replicate_write(
     };
 
     let mut acks = 1; // Count self
-    
+
     // Send to all peers in parallel
     let mut handles = Vec::new();
     for (peer_id, peer_addr) in peers {
         let op = operation.clone();
         let seq = sequence;
         let lid = leader_id.clone();
-        
+
         handles.push(tokio::spawn(async move {
             match send_replicate(&peer_addr, &lid, term, seq, op).await {
                 Ok(true) => Some(peer_id),
@@ -82,7 +84,7 @@ pub async fn replicate_write(
         if let Ok(Some(peer_id)) = handle.await {
             acks += 1;
             debug!(peer = %peer_id, acks, quorum = quorum_size, "Replication ack received");
-            
+
             if acks >= quorum_size {
                 // Update sequence in cluster state
                 let mut cluster = state.cluster.write().await;
@@ -104,13 +106,13 @@ pub async fn replicate_write(
 /// Append an operation to the local replication log
 fn append_to_log(db: &Database, operation: WriteOp) -> Result<u64, ReplicationError> {
     let sequence = db.get_latest_sequence()? + 1;
-    
+
     let write = ReplicatedWrite {
         sequence,
         operation,
         timestamp: Utc::now(),
     };
-    
+
     db.append_replication_log(&write)?;
     Ok(sequence)
 }
@@ -142,22 +144,18 @@ async fn send_replicate(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
-    
+
     let url = format!("http://{}/_internal/replicate", peer_addr);
-    
+
     let request = ReplicateRequest {
         leader_id: leader_id.to_string(),
         term,
         sequence,
         operation,
     };
-    
-    let response = client
-        .post(&url)
-        .json(&request)
-        .send()
-        .await?;
-    
+
+    let response = client.post(&url).json(&request).send().await?;
+
     if response.status().is_success() {
         let resp: ReplicateResponse = response.json().await?;
         Ok(resp.success)

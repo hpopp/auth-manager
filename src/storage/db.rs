@@ -80,7 +80,7 @@ impl Database {
                 .get(session.resource_id.as_str())?
                 .map(|v| bincode::deserialize(v.value()).unwrap_or_default())
                 .unwrap_or_default();
-            
+
             if !token_ids.contains(&session.id) {
                 token_ids.push(session.id.clone());
                 let index_data = bincode::serialize(&token_ids)?;
@@ -95,7 +95,7 @@ impl Database {
     pub fn get_session(&self, token_id: &str) -> Result<Option<SessionToken>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let table = read_txn.open_table(SESSIONS)?;
-        
+
         match table.get(token_id)? {
             Some(data) => {
                 let session: SessionToken = bincode::deserialize(data.value())?;
@@ -108,7 +108,7 @@ impl Database {
     /// Delete a session token
     pub fn delete_session(&self, token_id: &str) -> Result<bool, DatabaseError> {
         let write_txn = self.begin_write()?;
-        
+
         // First, get the session's resource_id for index cleanup
         let resource_id: Option<String> = {
             let table = write_txn.open_table(SESSIONS)?;
@@ -160,7 +160,10 @@ impl Database {
     }
 
     /// Get all sessions for a resource
-    pub fn get_sessions_by_resource(&self, resource_id: &str) -> Result<Vec<SessionToken>, DatabaseError> {
+    pub fn get_sessions_by_resource(
+        &self,
+        resource_id: &str,
+    ) -> Result<Vec<SessionToken>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let index_table = read_txn.open_table(RESOURCE_SESSIONS)?;
         let sessions_table = read_txn.open_table(SESSIONS)?;
@@ -185,14 +188,14 @@ impl Database {
     pub fn get_all_sessions(&self) -> Result<Vec<SessionToken>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let table = read_txn.open_table(SESSIONS)?;
-        
+
         let mut sessions = Vec::new();
         for result in table.iter()? {
             let (_, value) = result?;
             let session: SessionToken = bincode::deserialize(value.value())?;
             sessions.push(session);
         }
-        
+
         Ok(sessions)
     }
 
@@ -229,7 +232,7 @@ impl Database {
     pub fn get_api_key(&self, key_hash: &str) -> Result<Option<ApiKey>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let table = read_txn.open_table(API_KEYS)?;
-        
+
         match table.get(key_hash)? {
             Some(data) => {
                 let api_key: ApiKey = bincode::deserialize(data.value())?;
@@ -294,7 +297,10 @@ impl Database {
     }
 
     /// Get all API keys for a resource
-    pub fn get_api_keys_by_resource(&self, resource_id: &str) -> Result<Vec<ApiKey>, DatabaseError> {
+    pub fn get_api_keys_by_resource(
+        &self,
+        resource_id: &str,
+    ) -> Result<Vec<ApiKey>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let index_table = read_txn.open_table(RESOURCE_API_KEYS)?;
         let keys_table = read_txn.open_table(API_KEYS)?;
@@ -319,14 +325,14 @@ impl Database {
     pub fn get_all_api_keys(&self) -> Result<Vec<ApiKey>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let table = read_txn.open_table(API_KEYS)?;
-        
+
         let mut keys = Vec::new();
         for result in table.iter()? {
             let (_, value) = result?;
             let api_key: ApiKey = bincode::deserialize(value.value())?;
             keys.push(api_key);
         }
-        
+
         Ok(keys)
     }
 
@@ -338,7 +344,7 @@ impl Database {
     pub fn get_node_state(&self) -> Result<Option<NodeState>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let table = read_txn.open_table(NODE_META)?;
-        
+
         match table.get("state")? {
             Some(data) => {
                 let state: NodeState = bincode::deserialize(data.value())?;
@@ -377,17 +383,20 @@ impl Database {
     }
 
     /// Get replication log entries starting from a sequence number
-    pub fn get_replication_log_from(&self, from_sequence: u64) -> Result<Vec<ReplicatedWrite>, DatabaseError> {
+    pub fn get_replication_log_from(
+        &self,
+        from_sequence: u64,
+    ) -> Result<Vec<ReplicatedWrite>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let table = read_txn.open_table(REPLICATION_LOG)?;
-        
+
         let mut entries = Vec::new();
         for result in table.range(from_sequence..)? {
             let (_, value) = result?;
             let entry: ReplicatedWrite = bincode::deserialize(value.value())?;
             entries.push(entry);
         }
-        
+
         Ok(entries)
     }
 
@@ -395,7 +404,7 @@ impl Database {
     pub fn get_latest_sequence(&self) -> Result<u64, DatabaseError> {
         let read_txn = self.begin_read()?;
         let table = read_txn.open_table(REPLICATION_LOG)?;
-        
+
         let result = table.last()?;
         match result {
             Some((key, _)) => {
@@ -416,7 +425,7 @@ impl Database {
                 .range(..keep_from)?
                 .map(|r| r.map(|(k, _)| k.value()))
                 .collect::<Result<Vec<_>, _>>()?;
-            
+
             for key in keys_to_delete {
                 table.remove(key)?;
                 deleted += 1;
@@ -434,66 +443,70 @@ impl Database {
     pub fn purge_all(&self) -> Result<PurgeStats, DatabaseError> {
         let write_txn = self.begin_write()?;
         let mut stats = PurgeStats::default();
-        
+
         // Clear sessions - collect keys first, then remove
         {
             let table = write_txn.open_table(SESSIONS)?;
-            let keys: Vec<String> = table.iter()?
+            let keys: Vec<String> = table
+                .iter()?
                 .map(|r| r.map(|(k, _)| k.value().to_string()))
                 .collect::<Result<Vec<_>, _>>()?;
             drop(table);
-            
+
             let mut table = write_txn.open_table(SESSIONS)?;
             for key in keys {
                 table.remove(key.as_str())?;
                 stats.sessions += 1;
             }
         }
-        
+
         // Clear resource_sessions index
         {
             let table = write_txn.open_table(RESOURCE_SESSIONS)?;
-            let keys: Vec<String> = table.iter()?
+            let keys: Vec<String> = table
+                .iter()?
                 .map(|r| r.map(|(k, _)| k.value().to_string()))
                 .collect::<Result<Vec<_>, _>>()?;
             drop(table);
-            
+
             let mut table = write_txn.open_table(RESOURCE_SESSIONS)?;
             for key in keys {
                 table.remove(key.as_str())?;
             }
         }
-        
+
         // Clear API keys
         {
             let table = write_txn.open_table(API_KEYS)?;
-            let keys: Vec<String> = table.iter()?
+            let keys: Vec<String> = table
+                .iter()?
                 .map(|r| r.map(|(k, _)| k.value().to_string()))
                 .collect::<Result<Vec<_>, _>>()?;
             drop(table);
-            
+
             let mut table = write_txn.open_table(API_KEYS)?;
             for key in keys {
                 table.remove(key.as_str())?;
                 stats.api_keys += 1;
             }
         }
-        
+
         // Clear replication log
         {
             let table = write_txn.open_table(REPLICATION_LOG)?;
-            let keys: Vec<u64> = table.iter()?
+            let keys: Vec<u64> = table
+                .iter()?
                 .map(|r| r.map(|(k, _)| k.value()))
                 .collect::<Result<Vec<_>, _>>()?;
             drop(table);
-            
+
             let mut table = write_txn.open_table(REPLICATION_LOG)?;
             for key in keys {
                 table.remove(key)?;
                 stats.replication_entries += 1;
             }
         }
-        
+
         write_txn.commit()?;
         Ok(stats)
     }
