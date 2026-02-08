@@ -1,0 +1,28 @@
+# Build artifacts
+/target/
+debug/
+*.pdb
+
+# Database files
+/data/
+*.redb
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

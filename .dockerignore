@@ -1,0 +1,8 @@
+target/
+data/
+*.redb
+.git/
+.gitignore
+*.md
+api-docs/
+tests/

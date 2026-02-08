@@ -1,0 +1,94 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+/// Device kind detected from User-Agent
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum DeviceKind {
+    Desktop,
+    Mobile,
+    Tablet,
+    Bot,
+    #[default]
+    Unknown,
+}
+
+/// Information about the device that created a session
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DeviceInfo {
+    pub kind: DeviceKind,
+    pub raw_user_agent: String,
+    pub os: Option<String>,
+    pub os_version: Option<String>,
+    pub browser: Option<String>,
+    pub browser_version: Option<String>,
+}
+
+/// A session token
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionToken {
+    /// Opaque token identifier (32-byte hex)
+    pub id: String,
+    /// Generic owner (user, service, device, etc.)
+    pub resource_id: String,
+    /// When the token was created
+    pub created_at: DateTime<Utc>,
+    /// When the token expires
+    pub expires_at: DateTime<Utc>,
+    /// Information about the device that created this session
+    pub device_info: DeviceInfo,
+}
+
+/// An API key
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKey {
+    /// Key identifier (used for lookups after hashing)
+    pub id: String,
+    /// Hash of the actual key (we don't store the plaintext)
+    pub key_hash: String,
+    /// Human-readable name for the key
+    pub name: String,
+    /// When the key was created
+    pub created_at: DateTime<Utc>,
+    /// When the key expires (optional)
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// A write operation for replication
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplicatedWrite {
+    /// Monotonic, gapless sequence number
+    pub sequence: u64,
+    /// The operation being replicated
+    pub operation: WriteOp,
+    /// When the write occurred
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Types of write operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WriteOp {
+    CreateSession(SessionToken),
+    RevokeSession { token_id: String },
+    CreateApiKey(ApiKey),
+    RevokeApiKey { key_id: String },
+}
+
+/// Persistent node state (stored in redb)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeState {
+    pub node_id: String,
+    pub current_term: u64,
+    pub voted_for: Option<String>,
+    pub last_applied_sequence: u64,
+}
+
+impl NodeState {
+    pub fn new(node_id: String) -> Self {
+        Self {
+            node_id,
+            current_term: 0,
+            voted_for: None,
+            last_applied_sequence: 0,
+        }
+    }
+}

@@ -1,0 +1,35 @@
+meta {
+  name: Validate API Key
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api-keys/{{apiKey}}
+  body: none
+  auth: none
+}
+
+vars:pre-request {
+  apiKey: {{apiKey}}
+}
+
+docs {
+  # Validate API Key
+  
+  Validates an API key and returns its metadata if valid.
+  
+  ## Path Parameters
+  
+  | Parameter | Description |
+  |-----------|-------------|
+  | key | The API key to validate |
+  
+  ## Response
+  
+  Returns API key metadata (id, name, created_at, expires_at).
+  
+  Note: The actual key value is never returned after creation.
+  
+  Returns 404 if the key is invalid or expired.
+}

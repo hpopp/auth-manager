@@ -1,0 +1,28 @@
+meta {
+  name: Health Check
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/health
+  body: none
+  auth: none
+}
+
+docs {
+  # Health Check
+  
+  Simple health check endpoint for load balancers and monitoring.
+  
+  ## Response
+  
+  ```json
+  {
+    "status": "healthy",
+    "node_id": "node-1"
+  }
+  ```
+  
+  Always returns 200 OK if the service is running.
+}

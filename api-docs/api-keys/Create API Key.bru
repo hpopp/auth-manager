@@ -1,0 +1,45 @@
+meta {
+  name: Create API Key
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api-keys
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "name": "My API Key",
+    "expires_in_days": 365
+  }
+}
+
+vars:post-response {
+  apiKey: res.body.key
+  apiKeyId: res.body.id
+}
+
+docs {
+  # Create API Key
+  
+  Creates a new API key. The key value is only returned once at creation time.
+  
+  ## Request Body
+  
+  | Field | Type | Required | Description |
+  |-------|------|----------|-------------|
+  | name | string | Yes | Human-readable name for the key |
+  | expires_in_days | number | No | Days until expiration (null = never expires) |
+  
+  ## Response
+  
+  Returns the generated key (store this securely - it won't be shown again), 
+  along with the key ID, name, and expiration time.
+}

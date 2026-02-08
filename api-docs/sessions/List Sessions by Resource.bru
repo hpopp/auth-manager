@@ -1,0 +1,43 @@
+meta {
+  name: List Sessions by Resource
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/sessions/resource/user-123
+  body: none
+  auth: none
+}
+
+docs {
+  # List Sessions by Resource
+  
+  Lists all active sessions for a given resource ID.
+  
+  ## Path Parameters
+  
+  | Parameter | Description |
+  |-----------|-------------|
+  | resource_id | The resource identifier to list sessions for |
+  
+  ## Response
+  
+  ```json
+  [
+    {
+      "token": "abc123...",
+      "resource_id": "user-123",
+      "created_at": "2024-01-15T10:00:00Z",
+      "expires_at": "2024-01-15T11:00:00Z",
+      "device_info": {
+        "kind": "Desktop",
+        "os": "Mac OS X",
+        "os_version": "10.15",
+        "browser": "Chrome",
+        "browser_version": "120.0.0.0"
+      }
+    }
+  ]
+  ```
+}

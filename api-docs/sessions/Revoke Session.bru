@@ -1,0 +1,33 @@
+meta {
+  name: Revoke Session
+  type: http
+  seq: 3
+}
+
+delete {
+  url: {{baseUrl}}/sessions/{{sessionToken}}
+  body: none
+  auth: none
+}
+
+vars:pre-request {
+  sessionToken: {{sessionToken}}
+}
+
+docs {
+  # Revoke Session
+  
+  Revokes (deletes) a session token immediately.
+  
+  ## Path Parameters
+  
+  | Parameter | Description |
+  |-----------|-------------|
+  | token | The session token to revoke |
+  
+  ## Response
+  
+  Returns 204 No Content on success.
+  
+  Returns 404 if the token was not found.
+}

@@ -1,0 +1,53 @@
+meta {
+  name: Cluster Status
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/cluster/status
+  body: none
+  auth: none
+}
+
+docs {
+  # Cluster Status
+  
+  Returns detailed cluster status including role, term, and peer states.
+  
+  ## Response
+  
+  ```json
+  {
+    "node_id": "node-1",
+    "role": "Leader",
+    "term": 5,
+    "sequence": 12847,
+    "cluster_size": 3,
+    "quorum": 2,
+    "peers": [
+      {"id": "node-2", "status": "synced", "sequence": 12847},
+      {"id": "node-3", "status": "synced", "sequence": 12847}
+    ]
+  }
+  ```
+  
+  ## Fields
+  
+  | Field | Description |
+  |-------|-------------|
+  | node_id | This node's identifier |
+  | role | Current role: Leader, Follower, or Candidate |
+  | term | Current election term |
+  | sequence | Latest replication sequence number |
+  | cluster_size | Total nodes in cluster |
+  | quorum | Number of nodes needed for consensus |
+  | peers | Status of each peer node |
+  
+  ## Peer Status Values
+  
+  - `synced` - Peer is up to date
+  - `syncing` - Peer is catching up
+  - `unreachable` - Peer is not responding
+  - `unknown` - Initial state, not yet contacted
+}

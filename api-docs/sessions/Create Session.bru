@@ -1,0 +1,59 @@
+meta {
+  name: Create Session
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/sessions
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "resource_id": "user-123",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "ttl_seconds": 3600
+  }
+}
+
+vars:post-response {
+  sessionToken: res.body.token
+}
+
+docs {
+  # Create Session
+  
+  Creates a new session token for a resource (user, service, device, etc.).
+  
+  ## Request Body
+  
+  | Field | Type | Required | Description |
+  |-------|------|----------|-------------|
+  | resource_id | string | Yes | Identifier for the resource owning this session |
+  | user_agent | string | No | User-Agent string for device detection |
+  | ttl_seconds | number | No | Time-to-live in seconds (default: 86400) |
+  
+  ## Response
+  
+  ```json
+  {
+    "token": "abc123...",
+    "resource_id": "user-123",
+    "created_at": "2024-01-15T10:00:00Z",
+    "expires_at": "2024-01-15T11:00:00Z",
+    "device_info": {
+      "kind": "Desktop",
+      "os": "Mac OS X",
+      "os_version": "10.15",
+      "browser": "Chrome",
+      "browser_version": "120.0.0.0"
+    }
+  }
+  ```
+}

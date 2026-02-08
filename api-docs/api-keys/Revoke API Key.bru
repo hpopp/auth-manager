@@ -1,0 +1,33 @@
+meta {
+  name: Revoke API Key
+  type: http
+  seq: 3
+}
+
+delete {
+  url: {{baseUrl}}/api-keys/{{apiKey}}
+  body: none
+  auth: none
+}
+
+vars:pre-request {
+  apiKey: {{apiKey}}
+}
+
+docs {
+  # Revoke API Key
+  
+  Revokes (deletes) an API key immediately.
+  
+  ## Path Parameters
+  
+  | Parameter | Description |
+  |-----------|-------------|
+  | key | The API key to revoke |
+  
+  ## Response
+  
+  Returns 204 No Content on success.
+  
+  Returns 404 if the key was not found.
+}
