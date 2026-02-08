@@ -270,6 +270,53 @@ impl Database {
         }
     }
 
+    /// Update an API key's mutable fields
+    pub fn update_api_key(
+        &self,
+        key_hash: &str,
+        name: Option<&str>,
+        description: Option<Option<&str>>,
+        scopes: Option<&[String]>,
+    ) -> Result<bool, DatabaseError> {
+        let write_txn = self.begin_write()?;
+
+        // Read the existing key first
+        let existing = {
+            let table = write_txn.open_table(API_KEYS)?;
+            let result = match table.get(key_hash)? {
+                Some(data) => {
+                    let api_key: ApiKey = bincode::deserialize(data.value())?;
+                    Some(api_key)
+                }
+                None => None,
+            };
+            result
+        };
+
+        let updated = match existing {
+            Some(mut api_key) => {
+                if let Some(n) = name {
+                    api_key.name = n.to_string();
+                }
+                if let Some(d) = description {
+                    api_key.description = d.map(|s| s.to_string());
+                }
+                if let Some(s) = scopes {
+                    api_key.scopes = s.to_vec();
+                }
+
+                let serialized = bincode::serialize(&api_key)?;
+                let mut table = write_txn.open_table(API_KEYS)?;
+                table.insert(key_hash, serialized.as_slice())?;
+                true
+            }
+            None => false,
+        };
+
+        write_txn.commit()?;
+        Ok(updated)
+    }
+
     /// Resolve an API key UUID to its key_hash
     pub fn get_api_key_hash_by_id(&self, id: &str) -> Result<Option<String>, DatabaseError> {
         let read_txn = self.begin_read()?;

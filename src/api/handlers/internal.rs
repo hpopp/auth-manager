@@ -169,6 +169,19 @@ fn apply_write_op(
         WriteOp::RevokeApiKey { key_id } => {
             db.delete_api_key(key_id)?;
         }
+        WriteOp::UpdateApiKey {
+            key_hash,
+            description,
+            name,
+            scopes,
+        } => {
+            db.update_api_key(
+                key_hash,
+                name.as_deref(),
+                description.as_ref().map(|d| d.as_deref()),
+                scopes.as_deref(),
+            )?;
+        }
     }
     Ok(())
 }

@@ -79,6 +79,12 @@ pub enum WriteOp {
     CreateSession(SessionToken),
     RevokeApiKey { key_id: String },
     RevokeSession { token_id: String },
+    UpdateApiKey {
+        key_hash: String,
+        description: Option<Option<String>>,
+        name: Option<String>,
+        scopes: Option<Vec<String>>,
+    },
 }
 
 /// Persistent node state (stored in redb)

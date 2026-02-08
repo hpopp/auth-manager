@@ -15,7 +15,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     let write_routes = Router::new()
         .route("/admin/purge", delete(handlers::admin_purge))
         .route("/api-keys", post(handlers::create_api_key))
-        .route("/api-keys/:id", delete(handlers::revoke_api_key))
+        .route("/api-keys/:id", delete(handlers::revoke_api_key).put(handlers::update_api_key))
         .route("/sessions", post(handlers::create_session))
         .route("/sessions/:id", delete(handlers::revoke_session))
         .route_layer(middleware::from_fn_with_state(

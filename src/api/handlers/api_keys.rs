@@ -54,6 +54,16 @@ pub struct ApiKeyResponse {
     pub scopes: Vec<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdateApiKeyRequest {
+    #[serde(default)]
+    pub description: Option<Option<String>>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct VerifyApiKeyRequest {
     pub key: String,
@@ -105,6 +115,47 @@ pub async fn create_api_key(
         subject_id: api_key_record.subject_id,
         scopes: api_key_record.scopes,
     }))
+}
+
+pub async fn update_api_key(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateApiKeyRequest>,
+) -> Result<Json<JSend<ApiKeyResponse>>, ApiError> {
+    let key_hash = state
+        .db
+        .get_api_key_hash_by_id(&id)
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("API key not found"))?;
+
+    let operation = WriteOp::UpdateApiKey {
+        key_hash: key_hash.clone(),
+        description: req.description.clone(),
+        name: req.name.clone(),
+        scopes: req.scopes.clone(),
+    };
+    replicate_write(Arc::clone(&state), operation)
+        .await
+        .map_err(replication_error)?;
+
+    state
+        .db
+        .update_api_key(
+            &key_hash,
+            req.name.as_deref(),
+            req.description.as_ref().map(|d| d.as_deref()),
+            req.scopes.as_deref(),
+        )
+        .map_err(|e| ApiError::internal(format!("Failed to update API key: {}", e)))?;
+
+    let api_key_record = state
+        .db
+        .get_api_key(&key_hash)
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::internal("API key not found after update".to_string()))?;
+
+    tracing::debug!(id = %id, "Updated API key");
+    Ok(JSend::success(api_key_to_response(&api_key_record)))
 }
 
 pub async fn validate_api_key(

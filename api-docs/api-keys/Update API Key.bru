@@ -1,0 +1,73 @@
+meta {
+  name: Update API Key
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{baseUrl}}/api-keys/{{apiKeyId}}
+  body: json
+  auth: none
+}
+
+vars:pre-request {
+  apiKeyId: {{apiKeyId}}
+}
+
+body:json {
+  {
+    "name": "Updated Key Name",
+    "description": "Updated description",
+    "scopes": ["read", "write"]
+  }
+}
+
+docs {
+  # Update API Key
+  
+  Updates the name and/or description of an existing API key.
+  
+  ## Path Parameters
+  
+  | Parameter | Description                  |
+  |-----------|------------------------------|
+  | id        | The API key UUID to update   |
+  
+  ## Request Body
+  
+  All fields are optional. Only provided fields will be updated.
+  
+  | Field       | Type     | Required | Description                                |
+  |-------------|----------|----------|--------------------------------------------|
+  | name        | string   | No       | New name for the API key                   |
+  | description | string   | No       | New description (send null to clear it)    |
+  | scopes      | string[] | No       | New scopes (replaces the full array)       |
+  
+  ## Response
+  
+  ```json
+  {
+    "status": "success",
+    "data": {
+      "created_at": "2026-02-08T00:00:00Z",
+      "description": "Updated description",
+      "expires_at": "2026-03-10T00:00:00Z",
+      "id": "uuid",
+      "name": "Updated Key Name",
+      "subject_id": "user-123",
+      "scopes": ["read", "write"]
+    }
+  }
+  ```
+  
+  Returns 404 if the key was not found:
+  
+  ```json
+  {
+    "status": "fail",
+    "data": {
+      "message": "API key not found"
+    }
+  }
+  ```
+}
