@@ -21,6 +21,7 @@ pub enum ApiKeyError {
 pub fn create(
     db: &Database,
     name: &str,
+    resource_id: &str,
     expires_in_days: Option<u64>,
 ) -> Result<(String, ApiKey), ApiKeyError> {
     let key = generate_api_key();
@@ -28,15 +29,16 @@ pub fn create(
     let now = Utc::now();
 
     let api_key = ApiKey {
+        created_at: now,
+        expires_at: expires_in_days.map(|days| now + Duration::days(days as i64)),
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
         name: name.to_string(),
-        created_at: now,
-        expires_at: expires_in_days.map(|days| now + Duration::days(days as i64)),
+        resource_id: resource_id.to_string(),
     };
 
     db.put_api_key(&api_key)?;
-    tracing::debug!(key_id = %api_key.id, name = %name, "Created API key");
+    tracing::debug!(key_id = %api_key.id, resource_id = %resource_id, name = %name, "Created API key");
 
     Ok((key, api_key))
 }
@@ -69,6 +71,22 @@ pub fn revoke(db: &Database, key: &str) -> Result<bool, ApiKeyError> {
         tracing::debug!(key_hash = %key_hash, "Revoked API key");
     }
     Ok(deleted)
+}
+
+/// List all API keys for a resource
+pub fn list_by_resource(db: &Database, resource_id: &str) -> Result<Vec<ApiKey>, ApiKeyError> {
+    let keys = db.get_api_keys_by_resource(resource_id)?;
+    let now = Utc::now();
+
+    // Filter out expired keys
+    Ok(keys
+        .into_iter()
+        .filter(|k| {
+            k.expires_at
+                .map(|exp| exp > now)
+                .unwrap_or(true)
+        })
+        .collect())
 }
 
 /// Clean up expired API keys (called by background task)
@@ -109,9 +127,10 @@ mod tests {
     fn test_create_and_validate_api_key() {
         let (db, _temp) = setup_db();
         
-        let (key, api_key) = create(&db, "Test Key", None).unwrap();
+        let (key, api_key) = create(&db, "Test Key", "user-123", None).unwrap();
         assert!(key.starts_with("am_"));
         assert_eq!(api_key.name, "Test Key");
+        assert_eq!(api_key.resource_id, "user-123");
         assert!(api_key.expires_at.is_none());
 
         let validated = validate(&db, &key).unwrap();
@@ -123,7 +142,7 @@ mod tests {
     fn test_create_api_key_with_expiration() {
         let (db, _temp) = setup_db();
         
-        let (_, api_key) = create(&db, "Expiring Key", Some(30)).unwrap();
+        let (_, api_key) = create(&db, "Expiring Key", "user-456", Some(30)).unwrap();
         assert!(api_key.expires_at.is_some());
     }
 
@@ -131,10 +150,28 @@ mod tests {
     fn test_revoke_api_key() {
         let (db, _temp) = setup_db();
         
-        let (key, _) = create(&db, "Test Key", None).unwrap();
+        let (key, _) = create(&db, "Test Key", "user-789", None).unwrap();
         
         assert!(revoke(&db, &key).unwrap());
         assert!(validate(&db, &key).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_list_by_resource() {
+        let (db, _temp) = setup_db();
+
+        create(&db, "Key 1", "user-123", None).unwrap();
+        create(&db, "Key 2", "user-123", None).unwrap();
+        create(&db, "Key 3", "user-456", None).unwrap();
+
+        let keys = list_by_resource(&db, "user-123").unwrap();
+        assert_eq!(keys.len(), 2);
+
+        let keys = list_by_resource(&db, "user-456").unwrap();
+        assert_eq!(keys.len(), 1);
+
+        let keys = list_by_resource(&db, "user-999").unwrap();
+        assert_eq!(keys.len(), 0);
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! - **Static**: Uses a fixed list of peer addresses from configuration.
 
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use tracing::{debug, info, warn};
+use tracing::{info, trace, warn};
 
 /// Peer discovery strategy
 pub enum Discovery {
@@ -66,7 +66,7 @@ impl DnsPoll {
             })
             .collect();
 
-        debug!(
+        trace!(
             dns = %self.dns_name,
             peers = addrs.len(),
             "DNS discovery completed"

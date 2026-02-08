@@ -44,6 +44,7 @@ impl Database {
             let _ = write_txn.open_table(API_KEYS)?;
             let _ = write_txn.open_table(REPLICATION_LOG)?;
             let _ = write_txn.open_table(NODE_META)?;
+            let _ = write_txn.open_table(RESOURCE_API_KEYS)?;
             let _ = write_txn.open_table(RESOURCE_SESSIONS)?;
         }
         write_txn.commit()?;
@@ -206,6 +207,19 @@ impl Database {
             let mut table = write_txn.open_table(API_KEYS)?;
             let data = bincode::serialize(api_key)?;
             table.insert(api_key.key_hash.as_str(), data.as_slice())?;
+
+            // Update resource_api_keys index
+            let mut index_table = write_txn.open_table(RESOURCE_API_KEYS)?;
+            let mut key_hashes: Vec<String> = index_table
+                .get(api_key.resource_id.as_str())?
+                .map(|v| bincode::deserialize(v.value()).unwrap_or_default())
+                .unwrap_or_default();
+
+            if !key_hashes.contains(&api_key.key_hash) {
+                key_hashes.push(api_key.key_hash.clone());
+                let index_data = bincode::serialize(&key_hashes)?;
+                index_table.insert(api_key.resource_id.as_str(), index_data.as_slice())?;
+            }
         }
         write_txn.commit()?;
         Ok(())
@@ -228,14 +242,77 @@ impl Database {
     /// Delete an API key
     pub fn delete_api_key(&self, key_hash: &str) -> Result<bool, DatabaseError> {
         let write_txn = self.begin_write()?;
-        let deleted;
-        {
-            let mut table = write_txn.open_table(API_KEYS)?;
-            let result = table.remove(key_hash)?;
-            deleted = result.is_some();
-        }
+
+        // First, get the API key's resource_id for index cleanup
+        let resource_id: Option<String> = {
+            let table = write_txn.open_table(API_KEYS)?;
+            let result = table.get(key_hash)?;
+            match result {
+                Some(data) => {
+                    let api_key: ApiKey = bincode::deserialize(data.value())?;
+                    Some(api_key.resource_id)
+                }
+                None => None,
+            }
+        };
+
+        let deleted = match resource_id {
+            Some(rid) => {
+                // Remove from api_keys table
+                {
+                    let mut table = write_txn.open_table(API_KEYS)?;
+                    table.remove(key_hash)?;
+                }
+
+                // Update resource_api_keys index
+                let key_hashes: Option<Vec<String>> = {
+                    let index_table = write_txn.open_table(RESOURCE_API_KEYS)?;
+                    let result = index_table.get(rid.as_str())?;
+                    match result {
+                        Some(data) => Some(bincode::deserialize(data.value())?),
+                        None => None,
+                    }
+                };
+
+                if let Some(mut hashes) = key_hashes {
+                    hashes.retain(|h| h != key_hash);
+                    let mut index_table = write_txn.open_table(RESOURCE_API_KEYS)?;
+                    if hashes.is_empty() {
+                        index_table.remove(rid.as_str())?;
+                    } else {
+                        let new_index_data = bincode::serialize(&hashes)?;
+                        index_table.insert(rid.as_str(), new_index_data.as_slice())?;
+                    }
+                }
+                true
+            }
+            None => false,
+        };
+
         write_txn.commit()?;
         Ok(deleted)
+    }
+
+    /// Get all API keys for a resource
+    pub fn get_api_keys_by_resource(&self, resource_id: &str) -> Result<Vec<ApiKey>, DatabaseError> {
+        let read_txn = self.begin_read()?;
+        let index_table = read_txn.open_table(RESOURCE_API_KEYS)?;
+        let keys_table = read_txn.open_table(API_KEYS)?;
+
+        let key_hashes: Vec<String> = match index_table.get(resource_id)? {
+            Some(data) => bincode::deserialize(data.value())?,
+            None => return Ok(Vec::new()),
+        };
+
+        let mut api_keys = Vec::new();
+        for key_hash in key_hashes {
+            if let Some(data) = keys_table.get(key_hash.as_str())? {
+                let api_key: ApiKey = bincode::deserialize(data.value())?;
+                api_keys.push(api_key);
+            }
+        }
+
+        Ok(api_keys)
     }
 
     /// Get all API keys (for expiration cleanup)

@@ -36,7 +36,7 @@ async fn test_api_key_lifecycle() {
     let (db, _temp) = setup_test_db();
     
     // Create an API key
-    let (key, api_key) = auth_manager::tokens::api_key::create(&db, "Test API Key", Some(30)).unwrap();
+    let (key, api_key) = auth_manager::tokens::api_key::create(&db, "Test API Key", "resource-123", Some(30)).unwrap();
     assert!(key.starts_with("am_"));
     assert_eq!(api_key.name, "Test API Key");
     

@@ -191,11 +191,17 @@ pub struct DeviceInfoResponse {
     pub os_version: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ParseUserAgentRequest {
+    pub user_agent: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateApiKeyRequest {
     #[serde(default)]
     pub expires_in_days: Option<u64>,
     pub name: String,
+    pub resource_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -204,6 +210,7 @@ pub struct CreateApiKeyResponse {
     pub id: String,
     pub key: String,
     pub name: String,
+    pub resource_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -212,6 +219,7 @@ pub struct ApiKeyResponse {
     pub expires_at: Option<String>,
     pub id: String,
     pub name: String,
+    pub resource_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -512,11 +520,12 @@ pub async fn create_api_key(
     let now = Utc::now();
     
     let api_key_record = ApiKeyModel {
+        created_at: now,
+        expires_at: req.expires_in_days.map(|days| now + chrono::Duration::days(days as i64)),
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
         name: req.name.clone(),
-        created_at: now,
-        expires_at: req.expires_in_days.map(|days| now + chrono::Duration::days(days as i64)),
+        resource_id: req.resource_id.clone(),
     };
 
     // Replicate to cluster
@@ -536,10 +545,11 @@ pub async fn create_api_key(
             tracing::debug!(key_id = %api_key_record.id, name = %req.name, "Created API key");
             
             Ok(Json(CreateApiKeyResponse {
-                key,
-                id: api_key_record.id,
-                name: api_key_record.name,
                 expires_at: api_key_record.expires_at.map(|t| t.to_rfc3339()),
+                id: api_key_record.id,
+                key,
+                name: api_key_record.name,
+                resource_id: api_key_record.resource_id,
             }))
         }
         Err(ReplicationError::NotLeader) => Err((
@@ -657,6 +667,38 @@ pub async fn revoke_api_key(
             }),
         )),
     }
+}
+
+pub async fn list_api_keys(
+    State(state): State<Arc<AppState>>,
+    Path(resource_id): Path<String>,
+) -> Result<Json<Vec<ApiKeyResponse>>, (StatusCode, Json<ErrorResponse>)> {
+    match api_key::list_by_resource(&state.db, &resource_id) {
+        Ok(keys) => Ok(Json(keys.iter().map(api_key_to_response).collect())),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )),
+    }
+}
+
+// ============================================================================
+// Utility handlers
+// ============================================================================
+
+pub async fn parse_user_agent_handler(
+    Json(req): Json<ParseUserAgentRequest>,
+) -> Json<DeviceInfoResponse> {
+    let device_info = parse_user_agent(&req.user_agent);
+    Json(DeviceInfoResponse {
+        browser: device_info.browser,
+        browser_version: device_info.browser_version,
+        kind: format!("{:?}", device_info.kind),
+        os: device_info.os,
+        os_version: device_info.os_version,
+    })
 }
 
 // ============================================================================
@@ -915,9 +957,10 @@ fn session_to_response(session: &SessionToken) -> SessionResponse {
 
 fn api_key_to_response(api_key: &ApiKeyModel) -> ApiKeyResponse {
     ApiKeyResponse {
-        id: api_key.id.clone(),
-        name: api_key.name.clone(),
         created_at: api_key.created_at.to_rfc3339(),
         expires_at: api_key.expires_at.map(|t| t.to_rfc3339()),
+        id: api_key.id.clone(),
+        name: api_key.name.clone(),
+        resource_id: api_key.resource_id.clone(),
     }
 }

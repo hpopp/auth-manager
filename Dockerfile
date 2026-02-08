@@ -1,10 +1,10 @@
 # Build stage
-FROM rust:1.87-slim as builder
+FROM rust:1.87-alpine as builder
 
 WORKDIR /app
 
-# Install dependencies
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+# Install build dependencies for musl
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf
 
 # Copy source
 COPY Cargo.toml Cargo.lock ./
@@ -14,9 +14,23 @@ COPY src ./src
 RUN cargo build --release
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM alpine:3.21
 
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+ARG CREATED
+ARG VERSION
+
+LABEL org.opencontainers.image.authors="Henry Popp <henry@hpopp.dev>"
+LABEL org.opencontainers.image.created="${CREATED}"
+LABEL org.opencontainers.image.description="Lightweight, clusterable authentication and API key management service"
+LABEL org.opencontainers.image.documentation="https://github.com/hpopp/auth-manager"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.source="https://github.com/hpopp/auth-manager"
+LABEL org.opencontainers.image.title="Auth Manager"
+LABEL org.opencontainers.image.url="https://github.com/hpopp/auth-manager"
+LABEL org.opencontainers.image.vendor="Henry Popp"
+LABEL org.opencontainers.image.version="${VERSION}"
+
+RUN apk add --no-cache ca-certificates curl
 
 WORKDIR /app
 

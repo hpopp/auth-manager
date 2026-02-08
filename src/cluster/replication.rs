@@ -143,7 +143,7 @@ async fn send_replicate(
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
     
-    let url = format!("http://{}/internal/replicate", peer_addr);
+    let url = format!("http://{}/_internal/replicate", peer_addr);
     
     let request = ReplicateRequest {
         leader_id: leader_id.to_string(),

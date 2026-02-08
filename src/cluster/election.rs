@@ -146,7 +146,7 @@ async fn send_vote_request(
         .timeout(Duration::from_secs(2))
         .build()?;
     
-    let url = format!("http://{}/internal/vote", peer_addr);
+    let url = format!("http://{}/_internal/vote", peer_addr);
     
     let request = VoteRequest {
         candidate_id: node_id.to_string(),

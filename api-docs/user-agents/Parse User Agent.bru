@@ -1,0 +1,45 @@
+meta {
+  name: Parse User Agent
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/user-agents/parse
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  }
+}
+
+docs {
+  # Parse User Agent
+  
+  Parses a User-Agent string and returns structured device information.
+  
+  ## Request Body
+  
+  | Field | Type | Required | Description |
+  |-------|------|----------|-------------|
+  | user_agent | string | Yes | The User-Agent string to parse |
+  
+  ## Response
+  
+  ```json
+  {
+    "browser": "Chrome",
+    "browser_version": "120.0.0.0",
+    "kind": "Desktop",
+    "os": "Windows 10",
+    "os_version": "NT 10.0"
+  }
+  ```
+  
+  The `kind` field will be one of: `Desktop`, `Mobile`, `Tablet`, `Bot`, or `Unknown`.
+  
+  Fields may be `null` if the parser cannot determine the value.
+}

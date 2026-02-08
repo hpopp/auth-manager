@@ -17,6 +17,7 @@ headers {
 body:json {
   {
     "name": "My API Key",
+    "resource_id": "user-123",
     "expires_in_days": 365
   }
 }
@@ -29,17 +30,27 @@ vars:post-response {
 docs {
   # Create API Key
   
-  Creates a new API key. The key value is only returned once at creation time.
+  Creates a new API key for a resource. The key value is only returned once at creation time.
   
   ## Request Body
   
   | Field | Type | Required | Description |
   |-------|------|----------|-------------|
   | name | string | Yes | Human-readable name for the key |
+  | resource_id | string | Yes | Identifier for the resource owning this key |
   | expires_in_days | number | No | Days until expiration (null = never expires) |
   
   ## Response
   
-  Returns the generated key (store this securely - it won't be shown again), 
-  along with the key ID, name, and expiration time.
+  ```json
+  {
+    "expires_at": "2027-02-08T10:00:00Z",
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "key": "am_abc123...",
+    "name": "My API Key",
+    "resource_id": "user-123"
+  }
+  ```
+  
+  Store the `key` value securely — it won't be shown again.
 }

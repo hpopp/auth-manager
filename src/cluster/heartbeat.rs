@@ -96,7 +96,7 @@ async fn send_heartbeat(
         .timeout(Duration::from_secs(2))
         .build()?;
     
-    let url = format!("http://{}/internal/heartbeat", peer_addr);
+    let url = format!("http://{}/_internal/heartbeat", peer_addr);
     
     let request = HeartbeatRequest {
         leader_id: leader_id.to_string(),

@@ -11,13 +11,17 @@ x-common-env: &common-env
   RUST_LOG: auth_manager=debug
 
 x-common: &common
-  build: .
+  build:
+    context: .
+    args:
+      CREATED: "${CREATED:-}"
+      VERSION: "${VERSION:-0.1.0}"
   networks:
     auth-network:
       aliases:
         - auth-manager
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    test: ["CMD", "curl", "-f", "http://localhost:8080/_internal/health"]
     interval: 5s
     timeout: 3s
     retries: 3
