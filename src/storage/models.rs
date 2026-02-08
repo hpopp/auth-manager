@@ -77,8 +77,12 @@ pub struct ReplicatedWrite {
 pub enum WriteOp {
     CreateApiKey(ApiKey),
     CreateSession(SessionToken),
-    RevokeApiKey { key_id: String },
-    RevokeSession { token_id: String },
+    RevokeApiKey {
+        key_id: String,
+    },
+    RevokeSession {
+        token_id: String,
+    },
     UpdateApiKey {
         key_hash: String,
         description: Option<Option<String>>,

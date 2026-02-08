@@ -37,12 +37,13 @@ async fn test_api_key_lifecycle() {
     let (db, _temp) = setup_test_db();
 
     // Create an API key
+    let expires_at = chrono::Utc::now() + chrono::Duration::days(30);
     let (key, api_key) = auth_manager::tokens::api_key::create(
         &db,
         "Test API Key",
         "subject-123",
         None,
-        Some(30),
+        Some(expires_at),
         vec![],
     )
     .unwrap();

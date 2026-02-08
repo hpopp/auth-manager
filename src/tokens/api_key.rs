@@ -1,4 +1,4 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::storage::models::ApiKey;
@@ -23,7 +23,7 @@ pub fn create(
     name: &str,
     subject_id: &str,
     description: Option<String>,
-    expires_in_days: Option<u64>,
+    expires_at: Option<DateTime<Utc>>,
     scopes: Vec<String>,
 ) -> Result<(String, ApiKey), ApiKeyError> {
     let key = generate_api_key();
@@ -33,7 +33,7 @@ pub fn create(
     let api_key = ApiKey {
         created_at: now,
         description,
-        expires_at: expires_in_days.map(|days| now + Duration::days(days as i64)),
+        expires_at,
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
         name: name.to_string(),
@@ -143,7 +143,9 @@ mod tests {
     fn test_create_api_key_with_expiration() {
         let (db, _temp) = setup_db();
 
-        let (_, api_key) = create(&db, "Expiring Key", "user-456", None, Some(30), vec![]).unwrap();
+        let expires_at = Utc::now() + chrono::Duration::days(30);
+        let (_, api_key) =
+            create(&db, "Expiring Key", "user-456", None, Some(expires_at), vec![]).unwrap();
         assert!(api_key.expires_at.is_some());
     }
 

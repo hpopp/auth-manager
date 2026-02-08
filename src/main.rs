@@ -40,6 +40,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    info!(version = env!("CARGO_PKG_VERSION"), "auth-manager starting");
+
     // Load configuration
     let config = Config::load()?;
     info!("Loaded configuration for node: {}", config.node.id);

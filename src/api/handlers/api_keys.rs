@@ -25,7 +25,7 @@ pub struct CreateApiKeyRequest {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub expires_in_days: Option<u64>,
+    pub expires_at: Option<String>,
     pub name: String,
     pub subject_id: String,
     #[serde(default)]
@@ -77,6 +77,18 @@ pub async fn create_api_key(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateApiKeyRequest>,
 ) -> Result<Json<JSend<CreateApiKeyResponse>>, ApiError> {
+    validate_create_api_key(&req)?;
+
+    let expires_at = req
+        .expires_at
+        .as_deref()
+        .map(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|_| ApiError::bad_request("expires_at must be a valid RFC 3339 datetime"))
+        })
+        .transpose()?;
+
     let key = generate_api_key();
     let key_hash = hash_key(&key);
     let now = Utc::now();
@@ -84,9 +96,7 @@ pub async fn create_api_key(
     let api_key_record = ApiKeyModel {
         created_at: now,
         description: req.description.clone(),
-        expires_at: req
-            .expires_in_days
-            .map(|days| now + chrono::Duration::days(days as i64)),
+        expires_at,
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
         name: req.name.clone(),
@@ -122,6 +132,8 @@ pub async fn update_api_key(
     Path(id): Path<String>,
     Json(req): Json<UpdateApiKeyRequest>,
 ) -> Result<Json<JSend<ApiKeyResponse>>, ApiError> {
+    validate_update_api_key(&req)?;
+
     let key_hash = state
         .db
         .get_api_key_hash_by_id(&id)
@@ -162,6 +174,10 @@ pub async fn validate_api_key(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VerifyApiKeyRequest>,
 ) -> Result<Json<JSend<ApiKeyResponse>>, ApiError> {
+    if req.key.trim().is_empty() {
+        return Err(ApiError::bad_request("key is required"));
+    }
+
     let key = req.key;
     match api_key::validate(&state.db, &key) {
         Ok(Some(api_key_record)) => Ok(JSend::success(api_key_to_response(&api_key_record))),
@@ -212,6 +228,43 @@ pub async fn list_api_keys(
 // ============================================================================
 // Helpers
 // ============================================================================
+
+fn validate_create_api_key(req: &CreateApiKeyRequest) -> Result<(), ApiError> {
+    if req.name.trim().is_empty() {
+        return Err(ApiError::bad_request("name is required"));
+    }
+    if req.subject_id.trim().is_empty() {
+        return Err(ApiError::bad_request("subject_id is required"));
+    }
+    validate_scopes(&req.scopes)?;
+    Ok(())
+}
+
+fn validate_update_api_key(req: &UpdateApiKeyRequest) -> Result<(), ApiError> {
+    if req.name.is_none() && req.description.is_none() && req.scopes.is_none() {
+        return Err(ApiError::bad_request(
+            "at least one field (name, description, scopes) must be provided",
+        ));
+    }
+    if let Some(ref name) = req.name {
+        if name.trim().is_empty() {
+            return Err(ApiError::bad_request("name must not be empty"));
+        }
+    }
+    if let Some(ref scopes) = req.scopes {
+        validate_scopes(scopes)?;
+    }
+    Ok(())
+}
+
+fn validate_scopes(scopes: &[String]) -> Result<(), ApiError> {
+    for scope in scopes {
+        if scope.trim().is_empty() {
+            return Err(ApiError::bad_request("scope values must not be empty"));
+        }
+    }
+    Ok(())
+}
 
 fn api_key_to_response(api_key: &ApiKeyModel) -> ApiKeyResponse {
     ApiKeyResponse {

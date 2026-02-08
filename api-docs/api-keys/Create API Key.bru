@@ -20,7 +20,7 @@ body:json {
     "subject_id": "user-123",
     "description": "Key for accessing the reporting API",
     "scopes": ["read:reports", "write:reports"],
-    "expires_in_days": 365
+    "expires_at": "2027-02-08T00:00:00Z"
   }
 }
 
@@ -42,7 +42,7 @@ docs {
   | subject_id | string | Yes | Identifier for the subject (actor) owning this key |
   | description | string | No | Description of the key's purpose |
   | scopes | string[] | No | Permission scopes granted to this key (default: []) |
-  | expires_in_days | number | No | Days until expiration (null = never expires) |
+  | expires_at | string | No | RFC 3339 UTC expiration datetime (null = never expires) |
   
   ## Response
   

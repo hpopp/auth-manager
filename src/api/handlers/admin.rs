@@ -106,13 +106,17 @@ pub async fn admin_purge(
 
 pub async fn parse_user_agent_handler(
     Json(req): Json<ParseUserAgentRequest>,
-) -> Json<JSend<DeviceInfoResponse>> {
+) -> Result<Json<JSend<DeviceInfoResponse>>, ApiError> {
+    if req.user_agent.trim().is_empty() {
+        return Err(ApiError::bad_request("user_agent is required"));
+    }
+
     let device_info = parse_user_agent(&req.user_agent);
-    JSend::success(DeviceInfoResponse {
+    Ok(JSend::success(DeviceInfoResponse {
         browser: device_info.browser,
         browser_version: device_info.browser_version,
         kind: format!("{:?}", device_info.kind),
         os: device_info.os,
         os_version: device_info.os_version,
-    })
+    }))
 }

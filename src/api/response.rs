@@ -166,6 +166,10 @@ impl axum::response::IntoResponse for ApiError {
 }
 
 impl ApiError {
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        ApiError::Fail(StatusCode::BAD_REQUEST, message.into())
+    }
+
     pub fn not_found(message: impl Into<String>) -> Self {
         ApiError::Fail(StatusCode::NOT_FOUND, message.into())
     }

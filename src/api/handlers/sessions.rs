@@ -65,6 +65,8 @@ pub async fn create_session(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<Json<JSend<CreateSessionResponse>>, ApiError> {
+    validate_create_session(&req)?;
+
     let device_info = req
         .user_agent
         .as_deref()
@@ -108,6 +110,10 @@ pub async fn validate_session(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VerifySessionRequest>,
 ) -> Result<Json<JSend<SessionResponse>>, ApiError> {
+    if req.token.trim().is_empty() {
+        return Err(ApiError::bad_request("token is required"));
+    }
+
     let token = req.token;
     match session::validate(&state.db, &token) {
         Ok(Some(session)) => Ok(JSend::success(session_to_response(&session))),
@@ -158,6 +164,18 @@ pub async fn list_sessions(
 // ============================================================================
 // Helpers
 // ============================================================================
+
+fn validate_create_session(req: &CreateSessionRequest) -> Result<(), ApiError> {
+    if req.subject_id.trim().is_empty() {
+        return Err(ApiError::bad_request("subject_id is required"));
+    }
+    if let Some(ttl) = req.ttl_seconds {
+        if ttl == 0 {
+            return Err(ApiError::bad_request("ttl_seconds must be greater than 0"));
+        }
+    }
+    Ok(())
+}
 
 fn session_to_response(session: &SessionToken) -> SessionResponse {
     SessionResponse {
