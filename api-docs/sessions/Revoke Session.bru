@@ -27,7 +27,21 @@ docs {
   
   ## Response
   
-  Returns 204 No Content on success.
+  ```json
+  {
+    "status": "success",
+    "data": null
+  }
+  ```
   
-  Returns 404 if the token was not found.
+  Returns 404 if the token was not found:
+  
+  ```json
+  {
+    "status": "fail",
+    "data": {
+      "message": "Session not found"
+    }
+  }
+  ```
 }

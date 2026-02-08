@@ -13,6 +13,8 @@ use crate::storage::models::{ApiKey as ApiKeyModel, ReplicatedWrite, SessionToke
 use crate::tokens::{api_key, generator::{generate_api_key, generate_token, hash_key}, session};
 use crate::AppState;
 
+use super::response::{ApiError, JSend};
+
 // ============================================================================
 // Leader forwarding helper
 // ============================================================================
@@ -23,16 +25,11 @@ async fn forward_to_leader<T: serde::Serialize, R: serde::de::DeserializeOwned>(
     method: &str,
     path: &str,
     body: Option<&T>,
-) -> Result<R, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<R, ApiError> {
     let cluster = state.cluster.read().await;
     
     let leader_addr = cluster.get_leader_address().ok_or_else(|| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Leader unknown. Cluster may be electing a new leader.".to_string(),
-            }),
-        )
+        ApiError::unavailable("Leader unknown. Cluster may be electing a new leader.")
     })?;
     drop(cluster);
 
@@ -40,12 +37,7 @@ async fn forward_to_leader<T: serde::Serialize, R: serde::de::DeserializeOwned>(
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to create HTTP client: {}", e),
-                }),
-            )
+            ApiError::internal(format!("Failed to create HTTP client: {}", e))
         })?;
 
     let url = format!("http://{}{}", leader_addr, path);
@@ -64,35 +56,22 @@ async fn forward_to_leader<T: serde::Serialize, R: serde::de::DeserializeOwned>(
     };
 
     let response = request_builder.send().await.map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(ErrorResponse {
-                error: format!("Failed to forward request to leader: {}", e),
-            }),
-        )
+        ApiError::bad_gateway(format!("Failed to forward request to leader: {}", e))
     })?;
 
     let status = response.status();
     
     if status.is_success() {
         response.json::<R>().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to parse leader response: {}", e),
-                }),
-            )
+            ApiError::internal(format!("Failed to parse leader response: {}", e))
         })
     } else {
-        // Try to extract error message from leader
-        let error_resp: Result<ErrorResponse, _> = response.json().await;
-        let error_msg = error_resp
-            .map(|e| e.error)
+        let error_msg = response.text().await
             .unwrap_or_else(|_| format!("Leader returned status: {}", status));
         
-        Err((
+        Err(ApiError::from_status(
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-            Json(ErrorResponse { error: error_msg }),
+            error_msg,
         ))
     }
 }
@@ -101,16 +80,11 @@ async fn forward_to_leader<T: serde::Serialize, R: serde::de::DeserializeOwned>(
 async fn forward_delete_to_leader(
     state: &Arc<AppState>,
     path: &str,
-) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(), ApiError> {
     let cluster = state.cluster.read().await;
     
     let leader_addr = cluster.get_leader_address().ok_or_else(|| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Leader unknown. Cluster may be electing a new leader.".to_string(),
-            }),
-        )
+        ApiError::unavailable("Leader unknown. Cluster may be electing a new leader.")
     })?;
     drop(cluster);
 
@@ -118,23 +92,13 @@ async fn forward_delete_to_leader(
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to create HTTP client: {}", e),
-                }),
-            )
+            ApiError::internal(format!("Failed to create HTTP client: {}", e))
         })?;
 
     let url = format!("http://{}{}", leader_addr, path);
     
     let response = client.delete(&url).send().await.map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(ErrorResponse {
-                error: format!("Failed to forward request to leader: {}", e),
-            }),
-        )
+        ApiError::bad_gateway(format!("Failed to forward request to leader: {}", e))
     })?;
 
     let status = response.status();
@@ -142,15 +106,26 @@ async fn forward_delete_to_leader(
     if status.is_success() {
         Ok(())
     } else {
-        let error_resp: Result<ErrorResponse, _> = response.json().await;
-        let error_msg = error_resp
-            .map(|e| e.error)
+        let error_msg = response.text().await
             .unwrap_or_else(|_| format!("Leader returned status: {}", status));
         
-        Err((
+        Err(ApiError::from_status(
             StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-            Json(ErrorResponse { error: error_msg }),
+            error_msg,
         ))
+    }
+}
+
+/// Map a ReplicationError to an ApiError
+fn replication_error(e: ReplicationError) -> ApiError {
+    match e {
+        ReplicationError::NotLeader => {
+            ApiError::unavailable("Not the leader. Forward request to leader.")
+        }
+        ReplicationError::NoQuorum => {
+            ApiError::unavailable("Failed to reach quorum for replication")
+        }
+        _ => ApiError::internal(e.to_string()),
     }
 }
 
@@ -246,11 +221,6 @@ pub struct PeerStatus {
     pub status: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ErrorResponse {
-    pub error: String,
-}
-
 #[derive(Debug, Serialize)]
 pub struct PurgeResponse {
     pub api_keys_deleted: u64,
@@ -313,14 +283,14 @@ pub struct VoteResponse {
 pub async fn create_session(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateSessionRequest>,
-) -> Result<Json<CreateSessionResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<CreateSessionResponse>>, ApiError> {
     // Check if we're the leader (in cluster mode) - forward to leader if not
     if !state.config.is_single_node() {
         let cluster = state.cluster.read().await;
         if cluster.role != Role::Leader {
             drop(cluster);
             let response: CreateSessionResponse = forward_to_leader(&state, "POST", "/sessions", Some(&req)).await?;
-            return Ok(Json(response));
+            return Ok(JSend::success(response));
         }
     }
 
@@ -346,71 +316,36 @@ pub async fn create_session(
 
     // Replicate to cluster (includes local write)
     let operation = WriteOp::CreateSession(session.clone());
-    match replicate_write(Arc::clone(&state), operation).await {
-        Ok(_) => {
-            // Apply locally after successful replication
-            if let Err(e) = state.db.put_session(&session) {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: format!("Failed to store session: {}", e),
-                    }),
-                ));
-            }
-            
-            tracing::debug!(token_id = %session.id, resource_id = %req.resource_id, "Created session token");
-            
-            Ok(Json(CreateSessionResponse {
-                token: session.id,
-                expires_at: session.expires_at.to_rfc3339(),
-            }))
-        }
-        Err(ReplicationError::NotLeader) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Not the leader. Forward request to leader.".to_string(),
-            }),
-        )),
-        Err(ReplicationError::NoQuorum) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Failed to reach quorum for replication".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
-    }
+    replicate_write(Arc::clone(&state), operation).await.map_err(replication_error)?;
+
+    // Apply locally after successful replication
+    state.db.put_session(&session).map_err(|e| {
+        ApiError::internal(format!("Failed to store session: {}", e))
+    })?;
+    
+    tracing::debug!(token_id = %session.id, resource_id = %req.resource_id, "Created session token");
+    
+    Ok(JSend::success(CreateSessionResponse {
+        token: session.id,
+        expires_at: session.expires_at.to_rfc3339(),
+    }))
 }
 
 pub async fn validate_session(
     State(state): State<Arc<AppState>>,
     Path(token): Path<String>,
-) -> Result<Json<SessionResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<SessionResponse>>, ApiError> {
     match session::validate(&state.db, &token) {
-        Ok(Some(session)) => Ok(Json(session_to_response(&session))),
-        Ok(None) => Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "Session not found or expired".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
+        Ok(Some(session)) => Ok(JSend::success(session_to_response(&session))),
+        Ok(None) => Err(ApiError::not_found("Session not found or expired")),
+        Err(e) => Err(ApiError::internal(e.to_string())),
     }
 }
 
 pub async fn revoke_session(
     State(state): State<Arc<AppState>>,
     Path(token): Path<String>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<()>>, ApiError> {
     // Check if we're the leader (in cluster mode) - forward to leader if not
     if !state.config.is_single_node() {
         let cluster = state.cluster.read().await;
@@ -418,81 +353,37 @@ pub async fn revoke_session(
             drop(cluster);
             let path = format!("/sessions/{}", token);
             forward_delete_to_leader(&state, &path).await?;
-            return Ok(StatusCode::NO_CONTENT);
+            return Ok(JSend::success(()));
         }
     }
 
     // Check if session exists first
     match state.db.get_session(&token) {
         Ok(Some(_)) => {}
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "Session not found".to_string(),
-                }),
-            ));
-        }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: e.to_string(),
-                }),
-            ));
-        }
+        Ok(None) => return Err(ApiError::not_found("Session not found")),
+        Err(e) => return Err(ApiError::internal(e.to_string())),
     }
 
     // Replicate revocation to cluster
     let operation = WriteOp::RevokeSession { token_id: token.clone() };
-    match replicate_write(Arc::clone(&state), operation).await {
-        Ok(_) => {
-            // Apply locally after successful replication
-            if let Err(e) = state.db.delete_session(&token) {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: format!("Failed to delete session: {}", e),
-                    }),
-                ));
-            }
-            
-            tracing::debug!(token_id = %token, "Revoked session token");
-            Ok(StatusCode::NO_CONTENT)
-        }
-        Err(ReplicationError::NotLeader) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Not the leader. Forward request to leader.".to_string(),
-            }),
-        )),
-        Err(ReplicationError::NoQuorum) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Failed to reach quorum for replication".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
-    }
+    replicate_write(Arc::clone(&state), operation).await.map_err(replication_error)?;
+
+    // Apply locally after successful replication
+    state.db.delete_session(&token).map_err(|e| {
+        ApiError::internal(format!("Failed to delete session: {}", e))
+    })?;
+    
+    tracing::debug!(token_id = %token, "Revoked session token");
+    Ok(JSend::success(()))
 }
 
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Path(resource_id): Path<String>,
-) -> Result<Json<Vec<SessionResponse>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<Vec<SessionResponse>>>, ApiError> {
     match session::list_by_resource(&state.db, &resource_id) {
-        Ok(sessions) => Ok(Json(sessions.iter().map(session_to_response).collect())),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
+        Ok(sessions) => Ok(JSend::success(sessions.iter().map(session_to_response).collect())),
+        Err(e) => Err(ApiError::internal(e.to_string())),
     }
 }
 
@@ -503,14 +394,14 @@ pub async fn list_sessions(
 pub async fn create_api_key(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateApiKeyRequest>,
-) -> Result<Json<CreateApiKeyResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<CreateApiKeyResponse>>, ApiError> {
     // Check if we're the leader (in cluster mode) - forward to leader if not
     if !state.config.is_single_node() {
         let cluster = state.cluster.read().await;
         if cluster.role != Role::Leader {
             drop(cluster);
             let response: CreateApiKeyResponse = forward_to_leader(&state, "POST", "/api-keys", Some(&req)).await?;
-            return Ok(Json(response));
+            return Ok(JSend::success(response));
         }
     }
 
@@ -530,74 +421,39 @@ pub async fn create_api_key(
 
     // Replicate to cluster
     let operation = WriteOp::CreateApiKey(api_key_record.clone());
-    match replicate_write(Arc::clone(&state), operation).await {
-        Ok(_) => {
-            // Apply locally after successful replication
-            if let Err(e) = state.db.put_api_key(&api_key_record) {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: format!("Failed to store API key: {}", e),
-                    }),
-                ));
-            }
-            
-            tracing::debug!(key_id = %api_key_record.id, name = %req.name, "Created API key");
-            
-            Ok(Json(CreateApiKeyResponse {
-                expires_at: api_key_record.expires_at.map(|t| t.to_rfc3339()),
-                id: api_key_record.id,
-                key,
-                name: api_key_record.name,
-                resource_id: api_key_record.resource_id,
-            }))
-        }
-        Err(ReplicationError::NotLeader) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Not the leader. Forward request to leader.".to_string(),
-            }),
-        )),
-        Err(ReplicationError::NoQuorum) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Failed to reach quorum for replication".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
-    }
+    replicate_write(Arc::clone(&state), operation).await.map_err(replication_error)?;
+
+    // Apply locally after successful replication
+    state.db.put_api_key(&api_key_record).map_err(|e| {
+        ApiError::internal(format!("Failed to store API key: {}", e))
+    })?;
+    
+    tracing::debug!(key_id = %api_key_record.id, name = %req.name, "Created API key");
+    
+    Ok(JSend::success(CreateApiKeyResponse {
+        expires_at: api_key_record.expires_at.map(|t| t.to_rfc3339()),
+        id: api_key_record.id,
+        key,
+        name: api_key_record.name,
+        resource_id: api_key_record.resource_id,
+    }))
 }
 
 pub async fn validate_api_key(
     State(state): State<Arc<AppState>>,
     Path(key): Path<String>,
-) -> Result<Json<ApiKeyResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<ApiKeyResponse>>, ApiError> {
     match api_key::validate(&state.db, &key) {
-        Ok(Some(api_key_record)) => Ok(Json(api_key_to_response(&api_key_record))),
-        Ok(None) => Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "API key not found or expired".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
+        Ok(Some(api_key_record)) => Ok(JSend::success(api_key_to_response(&api_key_record))),
+        Ok(None) => Err(ApiError::not_found("API key not found or expired")),
+        Err(e) => Err(ApiError::internal(e.to_string())),
     }
 }
 
 pub async fn revoke_api_key(
     State(state): State<Arc<AppState>>,
     Path(key): Path<String>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<()>>, ApiError> {
     // Check if we're the leader (in cluster mode) - forward to leader if not
     if !state.config.is_single_node() {
         let cluster = state.cluster.read().await;
@@ -605,7 +461,7 @@ pub async fn revoke_api_key(
             drop(cluster);
             let path = format!("/api-keys/{}", key);
             forward_delete_to_leader(&state, &path).await?;
-            return Ok(StatusCode::NO_CONTENT);
+            return Ok(JSend::success(()));
         }
     }
 
@@ -613,74 +469,30 @@ pub async fn revoke_api_key(
     let key_hash = hash_key(&key);
     match state.db.get_api_key(&key_hash) {
         Ok(Some(_)) => {}
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "API key not found".to_string(),
-                }),
-            ));
-        }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: e.to_string(),
-                }),
-            ));
-        }
+        Ok(None) => return Err(ApiError::not_found("API key not found")),
+        Err(e) => return Err(ApiError::internal(e.to_string())),
     }
 
     // Replicate revocation to cluster
     let operation = WriteOp::RevokeApiKey { key_id: key_hash.clone() };
-    match replicate_write(Arc::clone(&state), operation).await {
-        Ok(_) => {
-            // Apply locally after successful replication
-            if let Err(e) = state.db.delete_api_key(&key_hash) {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: format!("Failed to delete API key: {}", e),
-                    }),
-                ));
-            }
-            
-            tracing::debug!(key_hash = %key_hash, "Revoked API key");
-            Ok(StatusCode::NO_CONTENT)
-        }
-        Err(ReplicationError::NotLeader) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Not the leader. Forward request to leader.".to_string(),
-            }),
-        )),
-        Err(ReplicationError::NoQuorum) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "Failed to reach quorum for replication".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
-    }
+    replicate_write(Arc::clone(&state), operation).await.map_err(replication_error)?;
+
+    // Apply locally after successful replication
+    state.db.delete_api_key(&key_hash).map_err(|e| {
+        ApiError::internal(format!("Failed to delete API key: {}", e))
+    })?;
+    
+    tracing::debug!(key_hash = %key_hash, "Revoked API key");
+    Ok(JSend::success(()))
 }
 
 pub async fn list_api_keys(
     State(state): State<Arc<AppState>>,
     Path(resource_id): Path<String>,
-) -> Result<Json<Vec<ApiKeyResponse>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<Vec<ApiKeyResponse>>>, ApiError> {
     match api_key::list_by_resource(&state.db, &resource_id) {
-        Ok(keys) => Ok(Json(keys.iter().map(api_key_to_response).collect())),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )),
+        Ok(keys) => Ok(JSend::success(keys.iter().map(api_key_to_response).collect())),
+        Err(e) => Err(ApiError::internal(e.to_string())),
     }
 }
 
@@ -690,9 +502,9 @@ pub async fn list_api_keys(
 
 pub async fn parse_user_agent_handler(
     Json(req): Json<ParseUserAgentRequest>,
-) -> Json<DeviceInfoResponse> {
+) -> Json<JSend<DeviceInfoResponse>> {
     let device_info = parse_user_agent(&req.user_agent);
-    Json(DeviceInfoResponse {
+    JSend::success(DeviceInfoResponse {
         browser: device_info.browser,
         browser_version: device_info.browser_version,
         kind: format!("{:?}", device_info.kind),
@@ -705,32 +517,32 @@ pub async fn parse_user_agent_handler(
 // Health and cluster handlers
 // ============================================================================
 
-pub async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "healthy".to_string(),
+pub async fn health(State(state): State<Arc<AppState>>) -> Json<JSend<HealthResponse>> {
+    JSend::success(HealthResponse {
         node_id: state.config.node.id.clone(),
+        status: "healthy".to_string(),
     })
 }
 
-pub async fn cluster_status(State(state): State<Arc<AppState>>) -> Json<ClusterStatusResponse> {
+pub async fn cluster_status(State(state): State<Arc<AppState>>) -> Json<JSend<ClusterStatusResponse>> {
     let cluster = state.cluster.read().await;
     
-    Json(ClusterStatusResponse {
-        node_id: state.config.node.id.clone(),
-        role: format!("{:?}", cluster.role),
-        term: cluster.current_term,
-        sequence: cluster.last_applied_sequence,
+    JSend::success(ClusterStatusResponse {
         cluster_size: cluster.cluster_size(),
-        quorum: cluster.quorum_size(),
+        node_id: state.config.node.id.clone(),
         peers: cluster
             .peer_states
             .iter()
             .map(|(id, peer)| PeerStatus {
                 id: id.clone(),
-                status: peer.status.clone(),
                 sequence: peer.sequence,
+                status: peer.status.clone(),
             })
             .collect(),
+        quorum: cluster.quorum_size(),
+        role: format!("{:?}", cluster.role),
+        sequence: cluster.last_applied_sequence,
+        term: cluster.current_term,
     })
 }
 
@@ -738,7 +550,7 @@ pub async fn cluster_status(State(state): State<Arc<AppState>>) -> Json<ClusterS
 /// This does NOT replicate - call on each node separately or use the cluster endpoint
 pub async fn admin_purge(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<PurgeResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<JSend<PurgeResponse>>, ApiError> {
     match state.db.purge_all() {
         Ok(stats) => {
             tracing::warn!(
@@ -747,18 +559,13 @@ pub async fn admin_purge(
                 replication_entries = stats.replication_entries,
                 "Purged all data"
             );
-            Ok(Json(PurgeResponse {
-                sessions_deleted: stats.sessions,
+            Ok(JSend::success(PurgeResponse {
                 api_keys_deleted: stats.api_keys,
                 replication_entries_deleted: stats.replication_entries,
+                sessions_deleted: stats.sessions,
             }))
         }
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to purge data: {}", e),
-            }),
-        )),
+        Err(e) => Err(ApiError::internal(format!("Failed to purge data: {}", e))),
     }
 }
 
@@ -769,7 +576,7 @@ pub async fn admin_purge(
 pub async fn internal_replicate(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ReplicateRequest>,
-) -> Result<Json<ReplicateResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ReplicateResponse>, ApiError> {
     let mut cluster = state.cluster.write().await;
     
     // Verify term - reject if our term is higher
@@ -800,12 +607,7 @@ pub async fn internal_replicate(
             
             if let Err(e) = state.db.append_replication_log(&write) {
                 tracing::error!(error = %e, "Failed to append to replication log");
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: format!("Failed to append to replication log: {}", e),
-                    }),
-                ));
+                return Err(ApiError::internal(format!("Failed to append to replication log: {}", e)));
             }
             
             // Update applied sequence
@@ -821,12 +623,7 @@ pub async fn internal_replicate(
         }
         Err(e) => {
             tracing::error!(error = %e, "Failed to apply replicated write");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to apply write: {}", e),
-                }),
-            ))
+            Err(ApiError::internal(format!("Failed to apply write: {}", e)))
         }
     }
 }

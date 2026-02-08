@@ -23,8 +23,8 @@ body:json {
 }
 
 vars:post-response {
-  apiKey: res.body.key
-  apiKeyId: res.body.id
+  apiKey: res.body.data.key
+  apiKeyId: res.body.data.id
 }
 
 docs {
@@ -44,11 +44,14 @@ docs {
   
   ```json
   {
-    "expires_at": "2027-02-08T10:00:00Z",
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "key": "am_abc123...",
-    "name": "My API Key",
-    "resource_id": "user-123"
+    "status": "success",
+    "data": {
+      "expires_at": "2027-02-08T10:00:00Z",
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "key": "am_abc123...",
+      "name": "My API Key",
+      "resource_id": "user-123"
+    }
   }
   ```
   

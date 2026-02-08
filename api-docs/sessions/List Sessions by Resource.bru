@@ -24,20 +24,23 @@ docs {
   ## Response
   
   ```json
-  [
-    {
-      "token": "abc123...",
-      "resource_id": "user-123",
-      "created_at": "2024-01-15T10:00:00Z",
-      "expires_at": "2024-01-15T11:00:00Z",
-      "device_info": {
-        "kind": "Desktop",
-        "os": "Mac OS X",
-        "os_version": "10.15",
-        "browser": "Chrome",
-        "browser_version": "120.0.0.0"
+  {
+    "status": "success",
+    "data": [
+      {
+        "created_at": "2026-02-08T10:00:00Z",
+        "device_info": {
+          "browser": "Chrome",
+          "browser_version": "120.0.0.0",
+          "kind": "Desktop",
+          "os": "Mac OS X",
+          "os_version": "10.15"
+        },
+        "expires_at": "2026-02-08T11:00:00Z",
+        "resource_id": "user-123",
+        "token": "abc123..."
       }
-    }
-  ]
+    ]
+  }
   ```
 }

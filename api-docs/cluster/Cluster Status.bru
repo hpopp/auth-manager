@@ -19,16 +19,19 @@ docs {
   
   ```json
   {
-    "node_id": "node-1",
-    "role": "Leader",
-    "term": 5,
-    "sequence": 12847,
-    "cluster_size": 3,
-    "quorum": 2,
-    "peers": [
-      {"id": "node-2", "status": "synced", "sequence": 12847},
-      {"id": "node-3", "status": "synced", "sequence": 12847}
-    ]
+    "status": "success",
+    "data": {
+      "cluster_size": 3,
+      "node_id": "node-1",
+      "peers": [
+        {"id": "node-2", "sequence": 12847, "status": "synced"},
+        {"id": "node-3", "sequence": 12847, "status": "synced"}
+      ],
+      "quorum": 2,
+      "role": "Leader",
+      "sequence": 12847,
+      "term": 5
+    }
   }
   ```
   
@@ -36,13 +39,13 @@ docs {
   
   | Field | Description |
   |-------|-------------|
-  | node_id | This node's identifier |
-  | role | Current role: Leader, Follower, or Candidate |
-  | term | Current election term |
-  | sequence | Latest replication sequence number |
   | cluster_size | Total nodes in cluster |
-  | quorum | Number of nodes needed for consensus |
+  | node_id | This node's identifier |
   | peers | Status of each peer node |
+  | quorum | Number of nodes needed for consensus |
+  | role | Current role: Leader, Follower, or Candidate |
+  | sequence | Latest replication sequence number |
+  | term | Current election term |
   
   ## Peer Status Values
   
