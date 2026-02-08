@@ -184,9 +184,9 @@ impl Config {
             } else {
                 std::env::var("AUTH_MANAGER_DISCOVERY_STRATEGY")
                     .ok()
-                    .and_then(|s| match s.to_lowercase().as_str() {
-                        "dns" => Some(DiscoveryStrategy::Dns),
-                        _ => Some(DiscoveryStrategy::Static),
+                    .map(|s| match s.to_lowercase().as_str() {
+                        "dns" => DiscoveryStrategy::Dns,
+                        _ => DiscoveryStrategy::Static,
                     })
                     .unwrap_or(DiscoveryStrategy::Static)
             };

@@ -97,10 +97,8 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, ApiKeyError> {
 
     for api_key in keys {
         if let Some(expires_at) = api_key.expires_at {
-            if expires_at < now {
-                if db.delete_api_key(&api_key.key_hash)? {
-                    cleaned += 1;
-                }
+            if expires_at < now && db.delete_api_key(&api_key.key_hash)? {
+                cleaned += 1;
             }
         }
     }

@@ -84,10 +84,8 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, SessionError> {
     let mut cleaned = 0;
 
     for session in sessions {
-        if session.expires_at < now {
-            if db.delete_session(&session.token)? {
-                cleaned += 1;
-            }
+        if session.expires_at < now && db.delete_session(&session.token)? {
+            cleaned += 1;
         }
     }
 
