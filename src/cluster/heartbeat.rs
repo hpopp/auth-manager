@@ -1,6 +1,5 @@
 //! Heartbeat mechanism for leader-follower communication
 
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -8,6 +7,7 @@ use tracing::{debug, warn};
 
 use super::discovery;
 use super::node::Role;
+use super::rpc::{HeartbeatRequest, HeartbeatResponse};
 use crate::AppState;
 
 /// Start the heartbeat task
@@ -69,24 +69,6 @@ pub fn start_heartbeat_task(state: Arc<AppState>) -> JoinHandle<()> {
     })
 }
 
-/// Request body for heartbeat RPC
-#[derive(Debug, Serialize)]
-struct HeartbeatRequest {
-    leader_address: String,
-    leader_id: String,
-    sequence: u64,
-    term: u64,
-}
-
-/// Response from heartbeat RPC
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct HeartbeatResponse {
-    sequence: u64,
-    success: bool,
-    term: u64,
-}
-
 /// Send a heartbeat to a peer
 async fn send_heartbeat(
     client: &reqwest::Client,
@@ -99,10 +81,10 @@ async fn send_heartbeat(
     let url = format!("http://{}/_internal/heartbeat", peer_addr);
 
     let request = HeartbeatRequest {
+        leader_address: Some(leader_address.to_string()),
         leader_id: leader_id.to_string(),
-        leader_address: leader_address.to_string(),
-        term,
         sequence,
+        term,
     };
 
     let response = client.post(&url).json(&request).send().await?;

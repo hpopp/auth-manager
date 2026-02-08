@@ -22,7 +22,9 @@ pub fn create(
     db: &Database,
     name: &str,
     resource_id: &str,
+    description: Option<String>,
     expires_in_days: Option<u64>,
+    scopes: Vec<String>,
 ) -> Result<(String, ApiKey), ApiKeyError> {
     let key = generate_api_key();
     let key_hash = hash_key(&key);
@@ -30,11 +32,13 @@ pub fn create(
 
     let api_key = ApiKey {
         created_at: now,
+        description,
         expires_at: expires_in_days.map(|days| now + Duration::days(days as i64)),
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
         name: name.to_string(),
         resource_id: resource_id.to_string(),
+        scopes,
     };
 
     db.put_api_key(&api_key)?;
@@ -123,11 +127,12 @@ mod tests {
     fn test_create_and_validate_api_key() {
         let (db, _temp) = setup_db();
 
-        let (key, api_key) = create(&db, "Test Key", "user-123", None).unwrap();
+        let (key, api_key) = create(&db, "Test Key", "user-123", None, None, vec![]).unwrap();
         assert!(key.starts_with("am_"));
         assert_eq!(api_key.name, "Test Key");
         assert_eq!(api_key.resource_id, "user-123");
         assert!(api_key.expires_at.is_none());
+        assert!(api_key.scopes.is_empty());
 
         let validated = validate(&db, &key).unwrap();
         assert!(validated.is_some());
@@ -138,7 +143,7 @@ mod tests {
     fn test_create_api_key_with_expiration() {
         let (db, _temp) = setup_db();
 
-        let (_, api_key) = create(&db, "Expiring Key", "user-456", Some(30)).unwrap();
+        let (_, api_key) = create(&db, "Expiring Key", "user-456", None, Some(30), vec![]).unwrap();
         assert!(api_key.expires_at.is_some());
     }
 
@@ -146,7 +151,7 @@ mod tests {
     fn test_revoke_api_key() {
         let (db, _temp) = setup_db();
 
-        let (key, _) = create(&db, "Test Key", "user-789", None).unwrap();
+        let (key, _) = create(&db, "Test Key", "user-789", None, None, vec![]).unwrap();
 
         assert!(revoke(&db, &key).unwrap());
         assert!(validate(&db, &key).unwrap().is_none());
@@ -156,9 +161,9 @@ mod tests {
     fn test_list_by_resource() {
         let (db, _temp) = setup_db();
 
-        create(&db, "Key 1", "user-123", None).unwrap();
-        create(&db, "Key 2", "user-123", None).unwrap();
-        create(&db, "Key 3", "user-456", None).unwrap();
+        create(&db, "Key 1", "user-123", None, None, vec![]).unwrap();
+        create(&db, "Key 2", "user-123", None, None, vec![]).unwrap();
+        create(&db, "Key 3", "user-456", None, None, vec![]).unwrap();
 
         let keys = list_by_resource(&db, "user-123").unwrap();
         assert_eq!(keys.len(), 2);

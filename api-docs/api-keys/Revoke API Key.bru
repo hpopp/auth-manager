@@ -5,25 +5,25 @@ meta {
 }
 
 delete {
-  url: {{baseUrl}}/api-keys/{{apiKey}}
+  url: {{baseUrl}}/api-keys/{{apiKeyId}}
   body: none
   auth: none
 }
 
 vars:pre-request {
-  apiKey: {{apiKey}}
+  apiKeyId: {{apiKeyId}}
 }
 
 docs {
   # Revoke API Key
   
-  Revokes (deletes) an API key immediately.
+  Revokes (deletes) an API key immediately by its ID.
   
   ## Path Parameters
   
-  | Parameter | Description |
-  |-----------|-------------|
-  | key | The API key to revoke |
+  | Parameter | Description                  |
+  |-----------|------------------------------|
+  | id        | The API key UUID to revoke   |
   
   ## Response
   

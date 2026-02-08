@@ -18,17 +18,17 @@ async fn test_session_lifecycle() {
     let session =
         auth_manager::tokens::session::create(&db, "user-123", device_info, 3600).unwrap();
 
-    // Validate it exists
-    let validated = auth_manager::tokens::session::validate(&db, &session.id).unwrap();
+    // Validate it exists (by secret token)
+    let validated = auth_manager::tokens::session::validate(&db, &session.token).unwrap();
     assert!(validated.is_some());
     assert_eq!(validated.unwrap().resource_id, "user-123");
 
-    // Revoke it
-    let revoked = auth_manager::tokens::session::revoke(&db, &session.id).unwrap();
+    // Revoke it (by secret token)
+    let revoked = auth_manager::tokens::session::revoke(&db, &session.token).unwrap();
     assert!(revoked);
 
     // Verify it's gone
-    let validated = auth_manager::tokens::session::validate(&db, &session.id).unwrap();
+    let validated = auth_manager::tokens::session::validate(&db, &session.token).unwrap();
     assert!(validated.is_none());
 }
 
@@ -37,9 +37,15 @@ async fn test_api_key_lifecycle() {
     let (db, _temp) = setup_test_db();
 
     // Create an API key
-    let (key, api_key) =
-        auth_manager::tokens::api_key::create(&db, "Test API Key", "resource-123", Some(30))
-            .unwrap();
+    let (key, api_key) = auth_manager::tokens::api_key::create(
+        &db,
+        "Test API Key",
+        "resource-123",
+        None,
+        Some(30),
+        vec![],
+    )
+    .unwrap();
     assert!(key.starts_with("am_"));
     assert_eq!(api_key.name, "Test API Key");
 
@@ -76,8 +82,8 @@ async fn test_multiple_sessions_per_resource() {
     let sessions = auth_manager::tokens::session::list_by_resource(&db, "user-789").unwrap();
     assert_eq!(sessions.len(), 1);
 
-    // Revoke one session
-    auth_manager::tokens::session::revoke(&db, &s1.id).unwrap();
+    // Revoke one session (by token)
+    auth_manager::tokens::session::revoke(&db, &s1.token).unwrap();
 
     // Verify only one remains
     let sessions = auth_manager::tokens::session::list_by_resource(&db, "user-456").unwrap();

@@ -25,27 +25,28 @@ pub fn create(
 ) -> Result<SessionToken, SessionError> {
     let now = Utc::now();
     let session = SessionToken {
-        id: generate_token(),
-        resource_id: resource_id.to_string(),
         created_at: now,
-        expires_at: now + Duration::seconds(ttl_seconds as i64),
         device_info,
+        expires_at: now + Duration::seconds(ttl_seconds as i64),
+        id: uuid::Uuid::new_v4().to_string(),
+        resource_id: resource_id.to_string(),
+        token: generate_token(),
     };
 
     db.put_session(&session)?;
-    tracing::debug!(token_id = %session.id, resource_id = %resource_id, "Created session token");
+    tracing::debug!(id = %session.id, resource_id = %resource_id, "Created session token");
 
     Ok(session)
 }
 
 /// Validate a session token, returning it if valid
-pub fn validate(db: &Database, token_id: &str) -> Result<Option<SessionToken>, SessionError> {
-    match db.get_session(token_id)? {
+pub fn validate(db: &Database, token: &str) -> Result<Option<SessionToken>, SessionError> {
+    match db.get_session(token)? {
         Some(session) => {
             if session.expires_at < Utc::now() {
                 // Token is expired - delete it and return None
-                let _ = db.delete_session(token_id);
-                tracing::debug!(token_id = %token_id, "Session token expired");
+                let _ = db.delete_session(token);
+                tracing::debug!(id = %session.id, "Session token expired");
                 Ok(None)
             } else {
                 Ok(Some(session))
@@ -55,11 +56,11 @@ pub fn validate(db: &Database, token_id: &str) -> Result<Option<SessionToken>, S
     }
 }
 
-/// Revoke (delete) a session token
-pub fn revoke(db: &Database, token_id: &str) -> Result<bool, SessionError> {
-    let deleted = db.delete_session(token_id)?;
+/// Revoke (delete) a session token by its secret token value
+pub fn revoke(db: &Database, token: &str) -> Result<bool, SessionError> {
+    let deleted = db.delete_session(token)?;
     if deleted {
-        tracing::debug!(token_id = %token_id, "Revoked session token");
+        tracing::debug!(token = %token, "Revoked session token");
     }
     Ok(deleted)
 }
@@ -87,7 +88,7 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, SessionError> {
 
     for session in sessions {
         if session.expires_at < now {
-            if db.delete_session(&session.id)? {
+            if db.delete_session(&session.token)? {
                 cleaned += 1;
             }
         }
@@ -117,9 +118,11 @@ mod tests {
 
         let session = create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
         assert!(!session.id.is_empty());
+        assert!(!session.token.is_empty());
+        assert_ne!(session.id, session.token);
         assert_eq!(session.resource_id, "user123");
 
-        let validated = validate(&db, &session.id).unwrap();
+        let validated = validate(&db, &session.token).unwrap();
         assert!(validated.is_some());
         assert_eq!(validated.unwrap().id, session.id);
     }
@@ -130,8 +133,8 @@ mod tests {
 
         let session = create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
 
-        assert!(revoke(&db, &session.id).unwrap());
-        assert!(validate(&db, &session.id).unwrap().is_none());
+        assert!(revoke(&db, &session.token).unwrap());
+        assert!(validate(&db, &session.token).unwrap().is_none());
     }
 
     #[test]

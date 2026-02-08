@@ -23,6 +23,7 @@ body:json {
 }
 
 vars:post-response {
+  sessionId: res.body.data.id
   sessionToken: res.body.data.token
 }
 
@@ -46,8 +47,11 @@ docs {
     "status": "success",
     "data": {
       "expires_at": "2026-02-08T11:00:00Z",
+      "id": "550e8400-e29b-41d4-a716-446655440000",
       "token": "abc123..."
     }
   }
   ```
+  
+  Store the `token` value securely — it is used for verification and won't appear in list responses.
 }

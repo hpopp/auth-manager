@@ -4,10 +4,16 @@ meta {
   seq: 2
 }
 
-get {
-  url: {{baseUrl}}/sessions/{{sessionToken}}
-  body: none
+post {
+  url: {{baseUrl}}/sessions/verify
+  body: json
   auth: none
+}
+
+body:json {
+  {
+    "token": "{{sessionToken}}"
+  }
 }
 
 vars:pre-request {
@@ -19,11 +25,11 @@ docs {
   
   Validates a session token and returns its details if valid.
   
-  ## Path Parameters
+  ## Request Body
   
-  | Parameter | Description |
-  |-----------|-------------|
-  | token | The session token to validate |
+  | Field | Type   | Description                    |
+  |-------|--------|--------------------------------|
+  | token | string | The session token to validate  |
   
   ## Response
   
@@ -40,8 +46,8 @@ docs {
         "os_version": "10.15"
       },
       "expires_at": "2026-02-08T11:00:00Z",
-      "resource_id": "user-123",
-      "token": "abc123..."
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "resource_id": "user-123"
     }
   }
   ```

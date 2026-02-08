@@ -1,6 +1,5 @@
 //! Leader election with term-based voting
 
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -8,6 +7,7 @@ use tracing::{debug, info, warn};
 
 use super::discovery;
 use super::node::Role;
+use super::rpc::{VoteRequest, VoteResponse};
 use crate::AppState;
 
 /// Start the election monitor task
@@ -121,21 +121,6 @@ async fn request_votes(state: Arc<AppState>) {
             }
         });
     }
-}
-
-/// Request body for vote RPC
-#[derive(Debug, Serialize)]
-struct VoteRequest {
-    candidate_id: String,
-    last_sequence: u64,
-    term: u64,
-}
-
-/// Response from vote RPC
-#[derive(Debug, Deserialize)]
-struct VoteResponse {
-    term: u64,
-    vote_granted: bool,
 }
 
 /// Send a vote request to a peer

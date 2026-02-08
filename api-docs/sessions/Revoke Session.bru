@@ -5,25 +5,25 @@ meta {
 }
 
 delete {
-  url: {{baseUrl}}/sessions/{{sessionToken}}
+  url: {{baseUrl}}/sessions/{{sessionId}}
   body: none
   auth: none
 }
 
 vars:pre-request {
-  sessionToken: {{sessionToken}}
+  sessionId: {{sessionId}}
 }
 
 docs {
   # Revoke Session
   
-  Revokes (deletes) a session token immediately.
+  Revokes (deletes) a session token immediately by its ID.
   
   ## Path Parameters
   
-  | Parameter | Description |
-  |-----------|-------------|
-  | token | The session token to revoke |
+  | Parameter | Description                    |
+  |-----------|--------------------------------|
+  | id        | The session UUID to revoke     |
   
   ## Response
   
@@ -34,7 +34,7 @@ docs {
   }
   ```
   
-  Returns 404 if the token was not found:
+  Returns 404 if the session was not found:
   
   ```json
   {

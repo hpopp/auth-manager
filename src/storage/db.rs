@@ -46,6 +46,8 @@ impl Database {
             let _ = write_txn.open_table(NODE_META)?;
             let _ = write_txn.open_table(RESOURCE_API_KEYS)?;
             let _ = write_txn.open_table(RESOURCE_SESSIONS)?;
+            let _ = write_txn.open_table(SESSION_IDS)?;
+            let _ = write_txn.open_table(API_KEY_IDS)?;
         }
         write_txn.commit()?;
 
@@ -72,31 +74,35 @@ impl Database {
         {
             let mut table = write_txn.open_table(SESSIONS)?;
             let data = bincode::serialize(session)?;
-            table.insert(session.id.as_str(), data.as_slice())?;
+            table.insert(session.token.as_str(), data.as_slice())?;
 
-            // Update resource_sessions index
+            // Update resource_sessions index (keyed by token)
             let mut index_table = write_txn.open_table(RESOURCE_SESSIONS)?;
-            let mut token_ids: Vec<String> = index_table
+            let mut tokens: Vec<String> = index_table
                 .get(session.resource_id.as_str())?
                 .map(|v| bincode::deserialize(v.value()).unwrap_or_default())
                 .unwrap_or_default();
 
-            if !token_ids.contains(&session.id) {
-                token_ids.push(session.id.clone());
-                let index_data = bincode::serialize(&token_ids)?;
+            if !tokens.contains(&session.token) {
+                tokens.push(session.token.clone());
+                let index_data = bincode::serialize(&tokens)?;
                 index_table.insert(session.resource_id.as_str(), index_data.as_slice())?;
             }
+
+            // Update session ID index (UUID -> token)
+            let mut id_table = write_txn.open_table(SESSION_IDS)?;
+            id_table.insert(session.id.as_str(), session.token.as_str())?;
         }
         write_txn.commit()?;
         Ok(())
     }
 
-    /// Get a session token by ID
-    pub fn get_session(&self, token_id: &str) -> Result<Option<SessionToken>, DatabaseError> {
+    /// Get a session by its secret token value
+    pub fn get_session(&self, token: &str) -> Result<Option<SessionToken>, DatabaseError> {
         let read_txn = self.begin_read()?;
         let table = read_txn.open_table(SESSIONS)?;
 
-        match table.get(token_id)? {
+        match table.get(token)? {
             Some(data) => {
                 let session: SessionToken = bincode::deserialize(data.value())?;
                 Ok(Some(session))
@@ -105,51 +111,69 @@ impl Database {
         }
     }
 
-    /// Delete a session token
-    pub fn delete_session(&self, token_id: &str) -> Result<bool, DatabaseError> {
+    /// Resolve a session UUID to its secret token value
+    pub fn get_session_token_by_id(&self, id: &str) -> Result<Option<String>, DatabaseError> {
+        let read_txn = self.begin_read()?;
+        let table = read_txn.open_table(SESSION_IDS)?;
+
+        match table.get(id)? {
+            Some(data) => Ok(Some(data.value().to_string())),
+            None => Ok(None),
+        }
+    }
+
+    /// Delete a session by its secret token value
+    pub fn delete_session(&self, token: &str) -> Result<bool, DatabaseError> {
         let write_txn = self.begin_write()?;
 
-        // First, get the session's resource_id for index cleanup
-        let resource_id: Option<String> = {
+        // First, get the session for index cleanup
+        let session_info: Option<(String, String)> = {
             let table = write_txn.open_table(SESSIONS)?;
-            let result = table.get(token_id)?;
+            let result = table.get(token)?;
             match result {
                 Some(data) => {
                     let session: SessionToken = bincode::deserialize(data.value())?;
-                    Some(session.resource_id)
+                    Some((session.resource_id, session.id))
                 }
                 None => None,
             }
         };
 
-        let deleted = match resource_id {
-            Some(rid) => {
+        let deleted = match session_info {
+            Some((resource_id, session_id)) => {
                 // Remove from sessions table
                 {
                     let mut table = write_txn.open_table(SESSIONS)?;
-                    table.remove(token_id)?;
+                    table.remove(token)?;
                 }
 
                 // Update resource_sessions index
-                let token_ids: Option<Vec<String>> = {
+                let tokens: Option<Vec<String>> = {
                     let index_table = write_txn.open_table(RESOURCE_SESSIONS)?;
-                    let result = index_table.get(rid.as_str())?;
+                    let result = index_table.get(resource_id.as_str())?;
                     match result {
                         Some(data) => Some(bincode::deserialize(data.value())?),
                         None => None,
                     }
                 };
 
-                if let Some(mut ids) = token_ids {
-                    ids.retain(|id| id != token_id);
+                if let Some(mut t) = tokens {
+                    t.retain(|v| v != token);
                     let mut index_table = write_txn.open_table(RESOURCE_SESSIONS)?;
-                    if ids.is_empty() {
-                        index_table.remove(rid.as_str())?;
+                    if t.is_empty() {
+                        index_table.remove(resource_id.as_str())?;
                     } else {
-                        let new_index_data = bincode::serialize(&ids)?;
-                        index_table.insert(rid.as_str(), new_index_data.as_slice())?;
+                        let new_index_data = bincode::serialize(&t)?;
+                        index_table.insert(resource_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
+
+                // Remove from session ID index
+                {
+                    let mut id_table = write_txn.open_table(SESSION_IDS)?;
+                    id_table.remove(session_id.as_str())?;
+                }
+
                 true
             }
             None => false,
@@ -223,6 +247,10 @@ impl Database {
                 let index_data = bincode::serialize(&key_hashes)?;
                 index_table.insert(api_key.resource_id.as_str(), index_data.as_slice())?;
             }
+
+            // Update API key ID index (UUID -> key_hash)
+            let mut id_table = write_txn.open_table(API_KEY_IDS)?;
+            id_table.insert(api_key.id.as_str(), api_key.key_hash.as_str())?;
         }
         write_txn.commit()?;
         Ok(())
@@ -242,25 +270,36 @@ impl Database {
         }
     }
 
+    /// Resolve an API key UUID to its key_hash
+    pub fn get_api_key_hash_by_id(&self, id: &str) -> Result<Option<String>, DatabaseError> {
+        let read_txn = self.begin_read()?;
+        let table = read_txn.open_table(API_KEY_IDS)?;
+
+        match table.get(id)? {
+            Some(data) => Ok(Some(data.value().to_string())),
+            None => Ok(None),
+        }
+    }
+
     /// Delete an API key
     pub fn delete_api_key(&self, key_hash: &str) -> Result<bool, DatabaseError> {
         let write_txn = self.begin_write()?;
 
-        // First, get the API key's resource_id for index cleanup
-        let resource_id: Option<String> = {
+        // First, get the API key for index cleanup
+        let api_key_info: Option<(String, String)> = {
             let table = write_txn.open_table(API_KEYS)?;
             let result = table.get(key_hash)?;
             match result {
                 Some(data) => {
                     let api_key: ApiKey = bincode::deserialize(data.value())?;
-                    Some(api_key.resource_id)
+                    Some((api_key.resource_id, api_key.id))
                 }
                 None => None,
             }
         };
 
-        let deleted = match resource_id {
-            Some(rid) => {
+        let deleted = match api_key_info {
+            Some((resource_id, api_key_id)) => {
                 // Remove from api_keys table
                 {
                     let mut table = write_txn.open_table(API_KEYS)?;
@@ -270,7 +309,7 @@ impl Database {
                 // Update resource_api_keys index
                 let key_hashes: Option<Vec<String>> = {
                     let index_table = write_txn.open_table(RESOURCE_API_KEYS)?;
-                    let result = index_table.get(rid.as_str())?;
+                    let result = index_table.get(resource_id.as_str())?;
                     match result {
                         Some(data) => Some(bincode::deserialize(data.value())?),
                         None => None,
@@ -281,12 +320,19 @@ impl Database {
                     hashes.retain(|h| h != key_hash);
                     let mut index_table = write_txn.open_table(RESOURCE_API_KEYS)?;
                     if hashes.is_empty() {
-                        index_table.remove(rid.as_str())?;
+                        index_table.remove(resource_id.as_str())?;
                     } else {
                         let new_index_data = bincode::serialize(&hashes)?;
-                        index_table.insert(rid.as_str(), new_index_data.as_slice())?;
+                        index_table.insert(resource_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
+
+                // Remove from API key ID index
+                {
+                    let mut id_table = write_txn.open_table(API_KEY_IDS)?;
+                    id_table.remove(api_key_id.as_str())?;
+                }
+
                 true
             }
             None => false,
@@ -475,6 +521,21 @@ impl Database {
             }
         }
 
+        // Clear session ID index
+        {
+            let table = write_txn.open_table(SESSION_IDS)?;
+            let keys: Vec<String> = table
+                .iter()?
+                .map(|r| r.map(|(k, _)| k.value().to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(table);
+
+            let mut table = write_txn.open_table(SESSION_IDS)?;
+            for key in keys {
+                table.remove(key.as_str())?;
+            }
+        }
+
         // Clear API keys
         {
             let table = write_txn.open_table(API_KEYS)?;
@@ -488,6 +549,21 @@ impl Database {
             for key in keys {
                 table.remove(key.as_str())?;
                 stats.api_keys += 1;
+            }
+        }
+
+        // Clear API key ID index
+        {
+            let table = write_txn.open_table(API_KEY_IDS)?;
+            let keys: Vec<String> = table
+                .iter()?
+                .map(|r| r.map(|(k, _)| k.value().to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(table);
+
+            let mut table = write_txn.open_table(API_KEY_IDS)?;
+            for key in keys {
+                table.remove(key.as_str())?;
             }
         }
 

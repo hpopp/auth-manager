@@ -4,6 +4,7 @@ mod election;
 mod heartbeat;
 mod node;
 mod replication;
+pub mod rpc;
 
 pub use discovery::Discovery;
 pub use node::{ClusterState, PeerState, Role};

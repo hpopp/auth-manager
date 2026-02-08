@@ -8,7 +8,6 @@ x-common-env: &common-env
   AUTH_MANAGER_BIND_ADDRESS: "0.0.0.0:8080"
   AUTH_MANAGER_DATA_DIR: /data
   AUTH_MANAGER_DISCOVERY_DNS_NAME: auth-manager
-  LOG_FORMAT: json
   RUST_LOG: auth_manager=debug
 
 x-common: &common

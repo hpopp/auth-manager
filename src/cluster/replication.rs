@@ -1,12 +1,12 @@
 //! Quorum-based replication for write operations
 
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, warn};
 
 use super::node::Role;
+use super::rpc::{ReplicateRequest, ReplicateResponse};
 use crate::storage::models::{ReplicatedWrite, WriteOp};
 use crate::storage::Database;
 use crate::AppState;
@@ -116,23 +116,6 @@ fn append_to_log(db: &Database, operation: WriteOp) -> Result<u64, ReplicationEr
 
     db.append_replication_log(&write)?;
     Ok(sequence)
-}
-
-/// Request body for replication RPC
-#[derive(Debug, Serialize)]
-struct ReplicateRequest {
-    leader_id: String,
-    operation: WriteOp,
-    sequence: u64,
-    term: u64,
-}
-
-/// Response from replication RPC
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ReplicateResponse {
-    sequence: u64,
-    success: bool,
 }
 
 /// Send a replication request to a peer

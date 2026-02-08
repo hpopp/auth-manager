@@ -1,0 +1,175 @@
+use axum::{
+    extract::{Path, State},
+    Json,
+};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+use super::replication_error;
+use crate::api::response::{ApiError, JSend};
+use crate::cluster::replicate_write;
+use crate::storage::models::{ApiKey as ApiKeyModel, WriteOp};
+use crate::tokens::{
+    api_key,
+    generator::{generate_api_key, hash_key},
+};
+use crate::AppState;
+
+// ============================================================================
+// Types
+// ============================================================================
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateApiKeyRequest {
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub expires_in_days: Option<u64>,
+    pub name: String,
+    pub resource_id: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateApiKeyResponse {
+    pub description: Option<String>,
+    pub expires_at: Option<String>,
+    pub id: String,
+    pub key: String,
+    pub name: String,
+    pub resource_id: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApiKeyResponse {
+    pub created_at: String,
+    pub description: Option<String>,
+    pub expires_at: Option<String>,
+    pub id: String,
+    pub name: String,
+    pub resource_id: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyApiKeyRequest {
+    pub key: String,
+}
+
+// ============================================================================
+// Handlers
+// ============================================================================
+
+pub async fn create_api_key(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateApiKeyRequest>,
+) -> Result<Json<JSend<CreateApiKeyResponse>>, ApiError> {
+    let key = generate_api_key();
+    let key_hash = hash_key(&key);
+    let now = Utc::now();
+
+    let api_key_record = ApiKeyModel {
+        created_at: now,
+        description: req.description.clone(),
+        expires_at: req
+            .expires_in_days
+            .map(|days| now + chrono::Duration::days(days as i64)),
+        id: uuid::Uuid::new_v4().to_string(),
+        key_hash: key_hash.clone(),
+        name: req.name.clone(),
+        resource_id: req.resource_id.clone(),
+        scopes: req.scopes.clone(),
+    };
+
+    let operation = WriteOp::CreateApiKey(api_key_record.clone());
+    replicate_write(Arc::clone(&state), operation)
+        .await
+        .map_err(replication_error)?;
+
+    state
+        .db
+        .put_api_key(&api_key_record)
+        .map_err(|e| ApiError::internal(format!("Failed to store API key: {}", e)))?;
+
+    tracing::debug!(key_id = %api_key_record.id, name = %req.name, "Created API key");
+
+    Ok(JSend::success(CreateApiKeyResponse {
+        description: api_key_record.description,
+        expires_at: api_key_record.expires_at.map(|t| t.to_rfc3339()),
+        id: api_key_record.id,
+        key,
+        name: api_key_record.name,
+        resource_id: api_key_record.resource_id,
+        scopes: api_key_record.scopes,
+    }))
+}
+
+pub async fn validate_api_key(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<VerifyApiKeyRequest>,
+) -> Result<Json<JSend<ApiKeyResponse>>, ApiError> {
+    let key = req.key;
+    match api_key::validate(&state.db, &key) {
+        Ok(Some(api_key_record)) => Ok(JSend::success(api_key_to_response(&api_key_record))),
+        Ok(None) => Err(ApiError::not_found("API key not found or expired")),
+        Err(e) => Err(ApiError::internal(e.to_string())),
+    }
+}
+
+pub async fn revoke_api_key(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<JSend<()>>, ApiError> {
+    // Resolve UUID id to the internal key_hash
+    let key_hash = state
+        .db
+        .get_api_key_hash_by_id(&id)
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("API key not found"))?;
+
+    let operation = WriteOp::RevokeApiKey {
+        key_id: key_hash.clone(),
+    };
+    replicate_write(Arc::clone(&state), operation)
+        .await
+        .map_err(replication_error)?;
+
+    state
+        .db
+        .delete_api_key(&key_hash)
+        .map_err(|e| ApiError::internal(format!("Failed to delete API key: {}", e)))?;
+
+    tracing::debug!(id = %id, "Revoked API key");
+    Ok(JSend::success(()))
+}
+
+pub async fn list_api_keys(
+    State(state): State<Arc<AppState>>,
+    Path(resource_id): Path<String>,
+) -> Result<Json<JSend<Vec<ApiKeyResponse>>>, ApiError> {
+    match api_key::list_by_resource(&state.db, &resource_id) {
+        Ok(keys) => Ok(JSend::success(
+            keys.iter().map(api_key_to_response).collect(),
+        )),
+        Err(e) => Err(ApiError::internal(e.to_string())),
+    }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+fn api_key_to_response(api_key: &ApiKeyModel) -> ApiKeyResponse {
+    ApiKeyResponse {
+        created_at: api_key.created_at.to_rfc3339(),
+        description: api_key.description.clone(),
+        expires_at: api_key.expires_at.map(|t| t.to_rfc3339()),
+        id: api_key.id.clone(),
+        name: api_key.name.clone(),
+        resource_id: api_key.resource_id.clone(),
+        scopes: api_key.scopes.clone(),
+    }
+}

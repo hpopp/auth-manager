@@ -32,10 +32,12 @@ pub struct SessionToken {
     pub device_info: DeviceInfo,
     /// When the token expires
     pub expires_at: DateTime<Utc>,
-    /// Opaque token identifier (32-byte hex)
+    /// Non-secret UUID identifier (used for listing, revoking)
     pub id: String,
     /// Generic owner (user, service, device, etc.)
     pub resource_id: String,
+    /// Opaque secret token (32-byte hex, used for verification)
+    pub token: String,
 }
 
 /// An API key
@@ -43,6 +45,8 @@ pub struct SessionToken {
 pub struct ApiKey {
     /// When the key was created
     pub created_at: DateTime<Utc>,
+    /// Optional description of the key's purpose
+    pub description: Option<String>,
     /// When the key expires (optional)
     pub expires_at: Option<DateTime<Utc>>,
     /// Key identifier (used for lookups after hashing)
@@ -53,6 +57,8 @@ pub struct ApiKey {
     pub name: String,
     /// Generic owner (user, service, device, etc.)
     pub resource_id: String,
+    /// Permission scopes granted to this key
+    pub scopes: Vec<String>,
 }
 
 /// A write operation for replication
