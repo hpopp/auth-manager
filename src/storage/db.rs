@@ -8,21 +8,57 @@ use super::tables::*;
 #[derive(Debug, Error)]
 pub enum DatabaseError {
     #[error("Commit error: {0}")]
-    Commit(#[from] redb::CommitError),
+    Commit(Box<redb::CommitError>),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Database error: {0}")]
-    Redb(#[from] redb::Error),
+    Redb(Box<redb::Error>),
     #[error("Database error: {0}")]
-    RedbDatabase(#[from] redb::DatabaseError),
+    RedbDatabase(Box<redb::DatabaseError>),
     #[error("Serialization error: {0}")]
     Serialization(#[from] bincode::Error),
     #[error("Storage error: {0}")]
-    Storage(#[from] redb::StorageError),
+    Storage(Box<redb::StorageError>),
     #[error("Table error: {0}")]
-    Table(#[from] redb::TableError),
+    Table(Box<redb::TableError>),
     #[error("Transaction error: {0}")]
-    Transaction(#[from] redb::TransactionError),
+    Transaction(Box<redb::TransactionError>),
+}
+
+impl From<redb::CommitError> for DatabaseError {
+    fn from(e: redb::CommitError) -> Self {
+        DatabaseError::Commit(Box::new(e))
+    }
+}
+
+impl From<redb::DatabaseError> for DatabaseError {
+    fn from(e: redb::DatabaseError) -> Self {
+        DatabaseError::RedbDatabase(Box::new(e))
+    }
+}
+
+impl From<redb::Error> for DatabaseError {
+    fn from(e: redb::Error) -> Self {
+        DatabaseError::Redb(Box::new(e))
+    }
+}
+
+impl From<redb::StorageError> for DatabaseError {
+    fn from(e: redb::StorageError) -> Self {
+        DatabaseError::Storage(Box::new(e))
+    }
+}
+
+impl From<redb::TableError> for DatabaseError {
+    fn from(e: redb::TableError) -> Self {
+        DatabaseError::Table(Box::new(e))
+    }
+}
+
+impl From<redb::TransactionError> for DatabaseError {
+    fn from(e: redb::TransactionError) -> Self {
+        DatabaseError::Transaction(Box::new(e))
+    }
 }
 
 pub struct Database {

@@ -20,10 +20,10 @@ pub fn parse_user_agent(user_agent: &str) -> DeviceInfo {
             DeviceInfo {
                 kind,
                 raw_user_agent: user_agent.to_string(),
-                os: normalize_field(&result.os),
+                os: normalize_field(result.os),
                 os_version: normalize_field(&result.os_version),
-                browser: normalize_field(&result.name),
-                browser_version: normalize_field(&result.version),
+                browser: normalize_field(result.name),
+                browser_version: normalize_field(result.version),
             }
         }
         None => DeviceInfo {

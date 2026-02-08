@@ -46,16 +46,16 @@ This project uses `cargo fmt` for formatting.
 
 Deployments require the following environment variables to be set in containers:
 
-| Key                                    | Description                                                   | Required? | Default             |
-| -------------------------------------- | ------------------------------------------------------------- | --------- | ------------------- |
-| `AUTH_MANAGER_BIND_ADDRESS`            | HTTP server bind address.                                     |           | `0.0.0.0:8080`      |
-| `AUTH_MANAGER_DATA_DIR`                | Data directory for embedded database.                         |           | `./data`            |
-| `AUTH_MANAGER_DISCOVERY_DNS_NAME`      | DNS name for peer discovery. Enables DNS strategy.            |           |                     |
-| `AUTH_MANAGER_DISCOVERY_POLL_INTERVAL` | Discovery poll interval in seconds.                           |           | `5`                 |
-| `AUTH_MANAGER_NODE_ID`                 | Unique node identifier.                                       |           | Random UUID         |
-| `AUTH_MANAGER_PEERS`                   | Comma-separated static peer addresses.                        |           |                     |
-| `LOG_FORMAT`                           | Log output format: `gcp`, `json`, or `text`.                  |           | `text`              |
-| `RUST_LOG`                             | Log level filter.                                             |           | `auth_manager=info` |
+| Key                                    | Description                                        | Required? | Default             |
+| -------------------------------------- | -------------------------------------------------- | --------- | ------------------- |
+| `AUTH_MANAGER_BIND_ADDRESS`            | HTTP server bind address.                          |           | `0.0.0.0:8080`      |
+| `AUTH_MANAGER_DATA_DIR`                | Data directory for embedded database.              |           | `./data`            |
+| `AUTH_MANAGER_DISCOVERY_DNS_NAME`      | DNS name for peer discovery. Enables DNS strategy. |           |                     |
+| `AUTH_MANAGER_DISCOVERY_POLL_INTERVAL` | Discovery poll interval in seconds.                |           | `5`                 |
+| `AUTH_MANAGER_NODE_ID`                 | Unique node identifier.                            |           | Random UUID         |
+| `AUTH_MANAGER_PEERS`                   | Comma-separated static peer addresses.             |           |                     |
+| `LOG_FORMAT`                           | Log output format: `gcp`, `json`, or `text`.       |           | `text`              |
+| `RUST_LOG`                             | Log level filter.                                  |           | `auth_manager=info` |
 
 ### Liveness
 

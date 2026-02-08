@@ -97,10 +97,8 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, ApiKeyError> {
 
     for api_key in keys {
         if let Some(expires_at) = api_key.expires_at {
-            if expires_at < now {
-                if db.delete_api_key(&api_key.key_hash)? {
-                    cleaned += 1;
-                }
+            if expires_at < now && db.delete_api_key(&api_key.key_hash)? {
+                cleaned += 1;
             }
         }
     }
@@ -144,8 +142,15 @@ mod tests {
         let (db, _temp) = setup_db();
 
         let expires_at = Utc::now() + chrono::Duration::days(30);
-        let (_, api_key) =
-            create(&db, "Expiring Key", "user-456", None, Some(expires_at), vec![]).unwrap();
+        let (_, api_key) = create(
+            &db,
+            "Expiring Key",
+            "user-456",
+            None,
+            Some(expires_at),
+            vec![],
+        )
+        .unwrap();
         assert!(api_key.expires_at.is_some());
     }
 
