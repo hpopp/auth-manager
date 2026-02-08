@@ -54,7 +54,7 @@ Deployments require the following environment variables to be set in containers:
 | `AUTH_MANAGER_DISCOVERY_POLL_INTERVAL` | Discovery poll interval in seconds.                           |           | `5`                 |
 | `AUTH_MANAGER_NODE_ID`                 | Unique node identifier.                                       |           | Random UUID         |
 | `AUTH_MANAGER_PEERS`                   | Comma-separated static peer addresses.                        |           |                     |
-| `LOG_FORMAT`                           | Log output format. Set to `json` for structured JSON logging. |           | `text`              |
+| `LOG_FORMAT`                           | Log output format: `gcp`, `json`, or `text`.                  |           | `text`              |
 | `RUST_LOG`                             | Log level filter.                                             |           | `auth_manager=info` |
 
 ### Liveness

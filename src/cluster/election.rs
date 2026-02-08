@@ -97,9 +97,10 @@ async fn request_votes(state: Arc<AppState>) {
     for (peer_id, peer_addr) in peers {
         let state = Arc::clone(&state);
         let node_id = state.config.node.id.clone();
+        let client = state.http_client.clone();
 
         tokio::spawn(async move {
-            match send_vote_request(&peer_addr, &node_id, term, sequence).await {
+            match send_vote_request(&client, &peer_addr, &node_id, term, sequence).await {
                 Ok((peer_term, granted)) => {
                     let mut cluster = state.cluster.write().await;
 
@@ -139,15 +140,12 @@ struct VoteResponse {
 
 /// Send a vote request to a peer
 async fn send_vote_request(
+    client: &reqwest::Client,
     peer_addr: &str,
     node_id: &str,
     term: u64,
     sequence: u64,
 ) -> Result<(u64, bool), Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()?;
-
     let url = format!("http://{}/_internal/vote", peer_addr);
 
     let request = VoteRequest {

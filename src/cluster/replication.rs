@@ -66,9 +66,10 @@ pub async fn replicate_write(
         let op = operation.clone();
         let seq = sequence;
         let lid = leader_id.clone();
+        let client = state.http_client.clone();
 
         handles.push(tokio::spawn(async move {
-            match send_replicate(&peer_addr, &lid, term, seq, op).await {
+            match send_replicate(&client, &peer_addr, &lid, term, seq, op).await {
                 Ok(true) => Some(peer_id),
                 Ok(false) => None,
                 Err(e) => {
@@ -136,16 +137,13 @@ struct ReplicateResponse {
 
 /// Send a replication request to a peer
 async fn send_replicate(
+    client: &reqwest::Client,
     peer_addr: &str,
     leader_id: &str,
     term: u64,
     sequence: u64,
     operation: WriteOp,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()?;
-
     let url = format!("http://{}/_internal/replicate", peer_addr);
 
     let request = ReplicateRequest {

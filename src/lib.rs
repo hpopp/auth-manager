@@ -26,4 +26,5 @@ pub struct AppState {
     pub cluster: RwLock<cluster::ClusterState>,
     pub config: Config,
     pub db: Database,
+    pub http_client: reqwest::Client,
 }

@@ -40,11 +40,7 @@ async fn forward_to_leader<
     })?;
     drop(cluster);
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| ApiError::internal(format!("Failed to create HTTP client: {}", e)))?;
-
+    let client = &state.http_client;
     let url = format!("http://{}{}", leader_addr, path);
 
     let request_builder = match method {
@@ -97,11 +93,7 @@ async fn forward_delete_to_leader(state: &Arc<AppState>, path: &str) -> Result<(
     })?;
     drop(cluster);
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| ApiError::internal(format!("Failed to create HTTP client: {}", e)))?;
-
+    let client = &state.http_client;
     let url = format!("http://{}{}", leader_addr, path);
 
     let response = client.delete(&url).send().await.map_err(|e| {

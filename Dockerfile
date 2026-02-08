@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.87-alpine as builder
+FROM rust:1.87-alpine AS builder
 
 WORKDIR /app
 
@@ -39,10 +39,6 @@ COPY --from=builder /app/target/release/auth-manager /usr/local/bin/auth-manager
 
 # Create data directory
 RUN mkdir -p /data
-
-ENV AUTH_MANAGER_DATA_DIR=/data
-ENV AUTH_MANAGER_BIND_ADDRESS=0.0.0.0:8080
-ENV RUST_LOG=auth_manager=info
 
 EXPOSE 8080
 

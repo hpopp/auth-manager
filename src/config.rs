@@ -84,11 +84,11 @@ fn default_data_dir() -> String {
 }
 
 fn default_heartbeat_interval_ms() -> u64 {
-    150 // Send heartbeat every 150ms
+    1000 // Send heartbeat every 1s
 }
 
 fn default_election_timeout_ms() -> u64 {
-    1500 // Wait 1.5s before triggering election (more forgiving for Docker networking)
+    10000 // Wait 10s before triggering election
 }
 
 fn default_log_retention_entries() -> u64 {

@@ -42,8 +42,9 @@ pub fn start_heartbeat_task(state: Arc<AppState>) -> JoinHandle<()> {
                     let lid = leader_id.clone();
                     let la = leader_address.clone();
 
+                    let client = state.http_client.clone();
                     tokio::spawn(async move {
-                        match send_heartbeat(&peer_addr, &lid, &la, term, sequence).await {
+                        match send_heartbeat(&client, &peer_addr, &lid, &la, term, sequence).await {
                             Ok((peer_term, peer_sequence)) => {
                                 let mut cluster = state.cluster.write().await;
 
@@ -88,16 +89,13 @@ struct HeartbeatResponse {
 
 /// Send a heartbeat to a peer
 async fn send_heartbeat(
+    client: &reqwest::Client,
     peer_addr: &str,
     leader_id: &str,
     leader_address: &str,
     term: u64,
     sequence: u64,
 ) -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()?;
-
     let url = format!("http://{}/_internal/heartbeat", peer_addr);
 
     let request = HeartbeatRequest {

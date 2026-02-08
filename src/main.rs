@@ -7,28 +7,37 @@ use auth_manager::{api, cluster, config::Config, expiration, storage::Database, 
 use cluster::discovery::{Discovery, DnsPoll, StaticList};
 use tokio::sync::RwLock;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "auth_manager=debug,tower_http=debug".into());
 
     let log_format = std::env::var("LOG_FORMAT").unwrap_or_default();
-    if log_format.eq_ignore_ascii_case("json") {
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .json()
-                    .with_target(true)
-                    .with_span_list(false),
-            )
-            .init();
-    } else {
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(tracing_subscriber::fmt::layer())
-            .init();
+    match log_format.to_lowercase().as_str() {
+        "gcp" => {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(tracing_stackdriver::layer())
+                .init();
+        }
+        "json" => {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_target(true)
+                        .with_span_list(false),
+                )
+                .init();
+        }
+        _ => {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+        }
     }
 
     // Load configuration
@@ -45,11 +54,19 @@ async fn main() -> anyhow::Result<()> {
     // Initialize cluster state
     let cluster_state = cluster::ClusterState::new(&config, &db)?;
 
+    // Create shared HTTP client for internal cluster communication
+    let http_client = reqwest::Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .pool_max_idle_per_host(2)
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+
     // Create shared state
     let state = Arc::new(AppState {
-        db,
-        config: config.clone(),
         cluster: RwLock::new(cluster_state),
+        config: config.clone(),
+        db,
+        http_client,
     });
 
     // Run initial peer discovery before starting cluster tasks
