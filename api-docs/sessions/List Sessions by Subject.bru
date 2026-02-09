@@ -5,9 +5,13 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/sessions/subject/user-123
+  url: {{scheme}}://{{host}}:{{port}}/sessions/subject/{{subjectId}}
   body: none
   auth: none
+}
+
+vars:pre-request {
+  subjectId: user-123
 }
 
 docs {
