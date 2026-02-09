@@ -372,6 +372,7 @@ impl Database {
                 if let Some(s) = scopes {
                     api_key.scopes = s.to_vec();
                 }
+                api_key.updated_at = Some(chrono::Utc::now());
 
                 let serialized = rmp_serde::to_vec(&api_key)?;
                 let mut table = write_txn.open_table(API_KEYS)?;

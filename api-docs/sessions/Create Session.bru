@@ -17,6 +17,7 @@ headers {
 body:json {
   {
     "subject_id": "user-123",
+    "ip_address": "192.168.1.42",
     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "ttl_seconds": 3600
   }
@@ -37,6 +38,7 @@ docs {
   | Field | Type | Required | Description |
   |-------|------|----------|-------------|
   | subject_id | string | Yes | Identifier for the subject (actor) owning this session |
+  | ip_address | string | No | IP address of the client creating the session |
   | user_agent | string | No | User-Agent string for device detection |
   | ttl_seconds | number | No | Time-to-live in seconds (default: 86400) |
   

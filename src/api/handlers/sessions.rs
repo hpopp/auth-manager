@@ -20,6 +20,8 @@ use crate::AppState;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateSessionRequest {
+    #[serde(default)]
+    pub ip_address: Option<String>,
     pub subject_id: String,
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
@@ -40,6 +42,7 @@ pub struct SessionResponse {
     pub device_info: DeviceInfoResponse,
     pub expires_at: String,
     pub id: String,
+    pub ip_address: Option<String>,
     pub last_used_at: Option<String>,
     pub subject_id: String,
 }
@@ -84,6 +87,7 @@ pub async fn create_session(
         device_info,
         expires_at: now + chrono::Duration::seconds(ttl as i64),
         id: uuid::Uuid::new_v4().to_string(),
+        ip_address: req.ip_address.clone(),
         last_used_at: None,
         subject_id: req.subject_id.clone(),
         token: generate_token(),
@@ -209,6 +213,7 @@ fn session_to_response(session: &SessionToken) -> SessionResponse {
         },
         expires_at: session.expires_at.to_rfc3339(),
         id: session.id.clone(),
+        ip_address: session.ip_address.clone(),
         last_used_at: session.last_used_at.map(|t| t.to_rfc3339()),
         subject_id: session.subject_id.clone(),
     }

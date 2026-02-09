@@ -53,6 +53,7 @@ pub struct ApiKeyResponse {
     pub name: String,
     pub subject_id: String,
     pub scopes: Vec<String>,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -104,6 +105,7 @@ pub async fn create_api_key(
         name: req.name.clone(),
         subject_id: req.subject_id.clone(),
         scopes: req.scopes.clone(),
+        updated_at: Some(now),
     };
 
     let operation = WriteOp::CreateApiKey(api_key_record.clone());
@@ -298,5 +300,6 @@ fn api_key_to_response(api_key: &ApiKeyModel) -> ApiKeyResponse {
         name: api_key.name.clone(),
         subject_id: api_key.subject_id.clone(),
         scopes: api_key.scopes.clone(),
+        updated_at: api_key.updated_at.map(|t| t.to_rfc3339()),
     }
 }

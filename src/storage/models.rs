@@ -34,6 +34,9 @@ pub struct SessionToken {
     pub expires_at: DateTime<Utc>,
     /// Non-secret UUID identifier (used for listing, revoking)
     pub id: String,
+    /// IP address of the client that created this session
+    #[serde(default)]
+    pub ip_address: Option<String>,
     /// When the token was last used for validation
     #[serde(default)]
     pub last_used_at: Option<DateTime<Utc>>,
@@ -65,6 +68,9 @@ pub struct ApiKey {
     pub subject_id: String,
     /// Permission scopes granted to this key
     pub scopes: Vec<String>,
+    /// When the key was last updated
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 /// A write operation for replication

@@ -40,6 +40,7 @@ pub fn create(
         name: name.to_string(),
         subject_id: subject_id.to_string(),
         scopes,
+        updated_at: Some(now),
     };
 
     db.put_api_key(&api_key)?;

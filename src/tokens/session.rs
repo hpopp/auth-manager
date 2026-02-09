@@ -29,6 +29,7 @@ pub fn create(
         device_info,
         expires_at: now + Duration::seconds(ttl_seconds as i64),
         id: uuid::Uuid::new_v4().to_string(),
+        ip_address: None,
         last_used_at: None,
         subject_id: subject_id.to_string(),
         token: generate_token(),
