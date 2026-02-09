@@ -20,6 +20,9 @@ debug/
 *.swo
 *~
 
+# Benchmark Results
+/benchmarks/results/
+
 # OS files
 .DS_Store
 Thumbs.db
