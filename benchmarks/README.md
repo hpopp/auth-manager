@@ -10,13 +10,13 @@ Load tests for auth-manager using [k6](https://k6.io/).
 
 ## Scripts
 
-| Script | Description | VUs | Duration |
-| --- | --- | --- | --- |
-| `session_lifecycle.js` | Create, validate, and revoke sessions | 10-50 | 90s |
-| `api_key_lifecycle.js` | Create, validate, update, and revoke API keys | 10-50 | 90s |
-| `write_throughput.js` | Peak write throughput (session creates on leader) | 100 | 60s |
-| `read_throughput.js` | Peak read throughput (session validates on followers) | 100 | 60s |
-| `leader_forwarding.js` | Compare direct vs forwarded write latency | 20 | 60s |
+| Script                 | Description                                           | VUs   | Duration |
+| ---------------------- | ----------------------------------------------------- | ----- | -------- |
+| `session_lifecycle.js` | Create, validate, and revoke sessions                 | 10-50 | 90s      |
+| `api_key_lifecycle.js` | Create, validate, update, and revoke API keys         | 10-50 | 90s      |
+| `write_throughput.js`  | Peak write throughput (session creates on leader)     | 100   | 60s      |
+| `read_throughput.js`   | Peak read throughput (session validates on followers) | 100   | 60s      |
+| `leader_forwarding.js` | Compare direct vs forwarded write latency             | 20    | 60s      |
 
 ## Usage
 
