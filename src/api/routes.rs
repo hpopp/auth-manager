@@ -12,27 +12,35 @@ use crate::AppState;
 
 pub fn create_router(state: Arc<AppState>) -> Router {
     // Write routes -- follower nodes proxy these to the leader
-    let write_routes = Router::new()
-        .route("/admin/purge", delete(handlers::admin_purge))
+    let mut write_routes = Router::new()
         .route("/api-keys", post(handlers::create_api_key))
         .route(
             "/api-keys/:id",
             delete(handlers::revoke_api_key).put(handlers::update_api_key),
         )
         .route("/sessions", post(handlers::create_session))
-        .route("/sessions/:id", delete(handlers::revoke_session))
-        .route_layer(middleware::from_fn_with_state(
-            Arc::clone(&state),
-            leader_forward,
-        ));
+        .route("/sessions/:id", delete(handlers::revoke_session));
+
+    // Test-only routes -- dangerous operations gated behind TEST_MODE
+    if state.config.test_mode {
+        tracing::warn!("Test mode enabled — purge route is available.");
+        write_routes = write_routes.route("/admin/purge", delete(handlers::admin_purge));
+    }
+
+    let write_routes = write_routes.route_layer(middleware::from_fn_with_state(
+        Arc::clone(&state),
+        leader_forward,
+    ));
 
     // Read routes -- any node can serve these
     let read_routes = Router::new()
+        .route("/api-keys/:id", get(handlers::get_api_key))
         .route(
             "/api-keys/subject/:subject_id",
             get(handlers::list_api_keys),
         )
         .route("/api-keys/verify", post(handlers::validate_api_key))
+        .route("/sessions/:id", get(handlers::get_session))
         .route(
             "/sessions/subject/:subject_id",
             get(handlers::list_sessions),

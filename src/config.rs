@@ -17,6 +17,9 @@ pub enum ConfigError {
 pub struct Config {
     pub cluster: ClusterConfig,
     pub node: NodeConfig,
+    /// Enables dangerous operations like purge. Must never be true in production.
+    #[serde(default)]
+    pub test_mode: bool,
     #[serde(default)]
     pub tokens: TokenConfig,
 }
@@ -147,8 +150,7 @@ impl Config {
     /// Load configuration from file or environment
     pub fn load() -> Result<Self, ConfigError> {
         // Try to load from config.toml in current directory
-        let config_path =
-            std::env::var("AUTH_MANAGER_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
+        let config_path = std::env::var("CONFIG").unwrap_or_else(|_| "config.toml".to_string());
 
         if Path::new(&config_path).exists() {
             let contents = fs::read_to_string(&config_path)?;
@@ -157,16 +159,15 @@ impl Config {
             Ok(config)
         } else {
             // Use defaults with node ID from environment or generate one
-            let node_id = std::env::var("AUTH_MANAGER_NODE_ID")
-                .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+            let node_id =
+                std::env::var("NODE_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
 
-            let bind_address = std::env::var("AUTH_MANAGER_BIND_ADDRESS")
-                .unwrap_or_else(|_| default_bind_address());
+            let bind_address =
+                std::env::var("BIND_ADDRESS").unwrap_or_else(|_| default_bind_address());
 
-            let data_dir =
-                std::env::var("AUTH_MANAGER_DATA_DIR").unwrap_or_else(|_| default_data_dir());
+            let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| default_data_dir());
 
-            let peers: Vec<String> = std::env::var("AUTH_MANAGER_PEERS")
+            let peers: Vec<String> = std::env::var("PEERS")
                 .map(|p| {
                     p.split(',')
                         .map(|s| s.trim().to_string())
@@ -178,11 +179,11 @@ impl Config {
                 .unwrap_or_default();
 
             // Discovery configuration from environment
-            let dns_name = std::env::var("AUTH_MANAGER_DISCOVERY_DNS_NAME").ok();
+            let dns_name = std::env::var("DISCOVERY_DNS_NAME").ok();
             let discovery_strategy = if dns_name.is_some() {
                 DiscoveryStrategy::Dns
             } else {
-                std::env::var("AUTH_MANAGER_DISCOVERY_STRATEGY")
+                std::env::var("DISCOVERY_STRATEGY")
                     .ok()
                     .map(|s| match s.to_lowercase().as_str() {
                         "dns" => DiscoveryStrategy::Dns,
@@ -190,10 +191,14 @@ impl Config {
                     })
                     .unwrap_or(DiscoveryStrategy::Static)
             };
-            let poll_interval = std::env::var("AUTH_MANAGER_DISCOVERY_POLL_INTERVAL")
+            let poll_interval = std::env::var("DISCOVERY_POLL_INTERVAL")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(default_poll_interval_seconds());
+
+            let test_mode = std::env::var("TEST_MODE")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false);
 
             Ok(Config {
                 node: NodeConfig {
@@ -210,6 +215,7 @@ impl Config {
                     },
                     ..Default::default()
                 },
+                test_mode,
                 tokens: TokenConfig::default(),
             })
         }

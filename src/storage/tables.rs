@@ -1,15 +1,15 @@
 use redb::TableDefinition;
 
-/// Session tokens: token -> SessionToken (bincode)
+/// Session tokens: token -> SessionToken (msgpack)
 pub const SESSIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("sessions");
 
-/// API keys: key_hash -> ApiKey (bincode)
+/// API keys: key_hash -> ApiKey (msgpack)
 pub const API_KEYS: TableDefinition<&str, &[u8]> = TableDefinition::new("api_keys");
 
-/// Replication log: sequence_number -> ReplicatedWrite (bincode)
+/// Replication log: sequence_number -> ReplicatedWrite (msgpack)
 pub const REPLICATION_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("replication_log");
 
-/// Node state: "state" -> NodeState (bincode)
+/// Node state: "state" -> NodeState (msgpack)
 pub const NODE_META: TableDefinition<&str, &[u8]> = TableDefinition::new("node_meta");
 
 /// Secondary index: subject_id -> Vec<key_hash> (for listing API keys by subject)

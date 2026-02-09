@@ -58,6 +58,11 @@ pub async fn replicate_write(
         (peers, leader_id, term, quorum_size)
     };
 
+    debug_assert!(
+        quorum_size > 0 && quorum_size <= peers.len() + 1,
+        "quorum size must be between 1 and cluster size"
+    );
+
     let mut acks = 1; // Count self
 
     // Send to all peers in parallel
@@ -106,7 +111,13 @@ pub async fn replicate_write(
 
 /// Append an operation to the local replication log
 fn append_to_log(db: &Database, operation: WriteOp) -> Result<u64, ReplicationError> {
-    let sequence = db.get_latest_sequence()? + 1;
+    let previous_sequence = db.get_latest_sequence()?;
+    let sequence = previous_sequence + 1;
+
+    debug_assert!(
+        sequence > previous_sequence,
+        "sequence must be strictly monotonically increasing"
+    );
 
     let write = ReplicatedWrite {
         sequence,

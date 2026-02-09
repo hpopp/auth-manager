@@ -36,9 +36,11 @@ pub fn create(
         expires_at,
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
+        last_used_at: None,
         name: name.to_string(),
         subject_id: subject_id.to_string(),
         scopes,
+        updated_at: Some(now),
     };
 
     db.put_api_key(&api_key)?;
@@ -53,13 +55,17 @@ pub fn validate(db: &Database, key: &str) -> Result<Option<ApiKey>, ApiKeyError>
 
     match db.get_api_key(&key_hash)? {
         Some(api_key) => {
-            if let Some(expires_at) = api_key.expires_at {
-                if expires_at < Utc::now() {
-                    // Key is expired - delete it and return None
-                    let _ = db.delete_api_key(&key_hash);
-                    tracing::debug!(key_id = %api_key.id, "API key expired");
-                    return Ok(None);
+            if api_key.is_expired_at(Utc::now()) {
+                // Key is expired - delete it and return None
+                if let Err(e) = db.delete_api_key(&key_hash) {
+                    tracing::warn!(error = %e, key_id = %api_key.id, "Failed to delete expired API key");
                 }
+                tracing::debug!(key_id = %api_key.id, "API key expired");
+                return Ok(None);
+            }
+            // Update last_used_at (local-only, best-effort)
+            if let Err(e) = db.touch_api_key(&key_hash) {
+                tracing::warn!(error = %e, key_id = %api_key.id, "Failed to update API key last_used_at");
             }
             Ok(Some(api_key))
         }
@@ -83,10 +89,7 @@ pub fn list_by_subject(db: &Database, subject_id: &str) -> Result<Vec<ApiKey>, A
     let now = Utc::now();
 
     // Filter out expired keys
-    Ok(keys
-        .into_iter()
-        .filter(|k| k.expires_at.map(|exp| exp > now).unwrap_or(true))
-        .collect())
+    Ok(keys.into_iter().filter(|k| !k.is_expired_at(now)).collect())
 }
 
 /// Clean up expired API keys (called by background task)
@@ -96,10 +99,8 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, ApiKeyError> {
     let mut cleaned = 0;
 
     for api_key in keys {
-        if let Some(expires_at) = api_key.expires_at {
-            if expires_at < now && db.delete_api_key(&api_key.key_hash)? {
-                cleaned += 1;
-            }
+        if api_key.is_expired_at(now) && db.delete_api_key(&api_key.key_hash)? {
+            cleaned += 1;
         }
     }
 

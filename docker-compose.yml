@@ -2,13 +2,14 @@
 # No need to list peers explicitly — each node discovers the others via DNS.
 #
 # Kubernetes equivalent: create a headless Service and set
-#   AUTH_MANAGER_DISCOVERY_DNS_NAME to the service FQDN.
+#   DISCOVERY_DNS_NAME to the service FQDN.
 
 x-common-env: &common-env
-  AUTH_MANAGER_BIND_ADDRESS: "0.0.0.0:8080"
-  AUTH_MANAGER_DATA_DIR: /data
-  AUTH_MANAGER_DISCOVERY_DNS_NAME: auth-manager
+  BIND_ADDRESS: "0.0.0.0:8080"
+  DATA_DIR: /data
+  DISCOVERY_DNS_NAME: auth-manager
   RUST_LOG: auth_manager=debug
+  TEST_MODE: "true"
 
 x-common: &common
   build:
@@ -33,7 +34,7 @@ services:
     container_name: auth-manager-node-1
     environment:
       <<: *common-env
-      AUTH_MANAGER_NODE_ID: node-1
+      NODE_ID: node-1
     ports:
       - "8081:8080"
     volumes:
@@ -44,7 +45,7 @@ services:
     container_name: auth-manager-node-2
     environment:
       <<: *common-env
-      AUTH_MANAGER_NODE_ID: node-2
+      NODE_ID: node-2
     ports:
       - "8082:8080"
     volumes:
@@ -55,7 +56,7 @@ services:
     container_name: auth-manager-node-3
     environment:
       <<: *common-env
-      AUTH_MANAGER_NODE_ID: node-3
+      NODE_ID: node-3
     ports:
       - "8083:8080"
     volumes:

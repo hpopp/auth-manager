@@ -15,8 +15,10 @@ pub enum DatabaseError {
     Redb(Box<redb::Error>),
     #[error("Database error: {0}")]
     RedbDatabase(Box<redb::DatabaseError>),
+    #[error("Deserialization error: {0}")]
+    Deserialization(#[from] rmp_serde::decode::Error),
     #[error("Serialization error: {0}")]
-    Serialization(#[from] bincode::Error),
+    Serialization(#[from] rmp_serde::encode::Error),
     #[error("Storage error: {0}")]
     Storage(Box<redb::StorageError>),
     #[error("Table error: {0}")]
@@ -106,22 +108,29 @@ impl Database {
 
     /// Store a session token
     pub fn put_session(&self, session: &SessionToken) -> Result<(), DatabaseError> {
+        debug_assert!(!session.token.is_empty(), "session token must not be empty");
+        debug_assert!(!session.id.is_empty(), "session id must not be empty");
+        debug_assert!(
+            !session.subject_id.is_empty(),
+            "session subject_id must not be empty"
+        );
+
         let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(SESSIONS)?;
-            let data = bincode::serialize(session)?;
+            let data = rmp_serde::to_vec(session)?;
             table.insert(session.token.as_str(), data.as_slice())?;
 
             // Update resource_sessions index (keyed by token)
             let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
             let mut tokens: Vec<String> = index_table
                 .get(session.subject_id.as_str())?
-                .map(|v| bincode::deserialize(v.value()).unwrap_or_default())
+                .map(|v| rmp_serde::from_slice(v.value()).unwrap_or_default())
                 .unwrap_or_default();
 
             if !tokens.contains(&session.token) {
                 tokens.push(session.token.clone());
-                let index_data = bincode::serialize(&tokens)?;
+                let index_data = rmp_serde::to_vec(&tokens)?;
                 index_table.insert(session.subject_id.as_str(), index_data.as_slice())?;
             }
 
@@ -140,7 +149,7 @@ impl Database {
 
         match table.get(token)? {
             Some(data) => {
-                let session: SessionToken = bincode::deserialize(data.value())?;
+                let session: SessionToken = rmp_serde::from_slice(data.value())?;
                 Ok(Some(session))
             }
             None => Ok(None),
@@ -168,7 +177,7 @@ impl Database {
             let result = table.get(token)?;
             match result {
                 Some(data) => {
-                    let session: SessionToken = bincode::deserialize(data.value())?;
+                    let session: SessionToken = rmp_serde::from_slice(data.value())?;
                     Some((session.subject_id, session.id))
                 }
                 None => None,
@@ -188,7 +197,7 @@ impl Database {
                     let index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
                     let result = index_table.get(subject_id.as_str())?;
                     match result {
-                        Some(data) => Some(bincode::deserialize(data.value())?),
+                        Some(data) => Some(rmp_serde::from_slice(data.value())?),
                         None => None,
                     }
                 };
@@ -199,7 +208,7 @@ impl Database {
                     if t.is_empty() {
                         index_table.remove(subject_id.as_str())?;
                     } else {
-                        let new_index_data = bincode::serialize(&t)?;
+                        let new_index_data = rmp_serde::to_vec(&t)?;
                         index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
@@ -229,19 +238,49 @@ impl Database {
         let sessions_table = read_txn.open_table(SESSIONS)?;
 
         let token_ids: Vec<String> = match index_table.get(subject_id)? {
-            Some(data) => bincode::deserialize(data.value())?,
+            Some(data) => rmp_serde::from_slice(data.value())?,
             None => return Ok(Vec::new()),
         };
 
         let mut sessions = Vec::new();
         for token_id in token_ids {
             if let Some(data) = sessions_table.get(token_id.as_str())? {
-                let session: SessionToken = bincode::deserialize(data.value())?;
+                let session: SessionToken = rmp_serde::from_slice(data.value())?;
                 sessions.push(session);
             }
         }
 
         Ok(sessions)
+    }
+
+    /// Get a session by its UUID (resolves ID -> token -> session)
+    pub fn get_session_by_id(&self, id: &str) -> Result<Option<SessionToken>, DatabaseError> {
+        let token = match self.get_session_token_by_id(id)? {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+        self.get_session(&token)
+    }
+
+    /// Update last_used_at for a session (local-only, no replication)
+    pub fn touch_session(&self, token: &str) -> Result<(), DatabaseError> {
+        let write_txn = self.begin_write()?;
+        let existing = {
+            let table = write_txn.open_table(SESSIONS)?;
+            let result = match table.get(token)? {
+                Some(data) => Some(rmp_serde::from_slice::<SessionToken>(data.value())?),
+                None => None,
+            };
+            result
+        };
+        if let Some(mut session) = existing {
+            session.last_used_at = Some(chrono::Utc::now());
+            let serialized = rmp_serde::to_vec(&session)?;
+            let mut table = write_txn.open_table(SESSIONS)?;
+            table.insert(token, serialized.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
     }
 
     /// Get all sessions (for expiration cleanup)
@@ -252,7 +291,7 @@ impl Database {
         let mut sessions = Vec::new();
         for result in table.iter()? {
             let (_, value) = result?;
-            let session: SessionToken = bincode::deserialize(value.value())?;
+            let session: SessionToken = rmp_serde::from_slice(value.value())?;
             sessions.push(session);
         }
 
@@ -265,22 +304,32 @@ impl Database {
 
     /// Store an API key
     pub fn put_api_key(&self, api_key: &ApiKey) -> Result<(), DatabaseError> {
+        debug_assert!(
+            !api_key.key_hash.is_empty(),
+            "API key hash must not be empty"
+        );
+        debug_assert!(!api_key.id.is_empty(), "API key id must not be empty");
+        debug_assert!(
+            !api_key.subject_id.is_empty(),
+            "API key subject_id must not be empty"
+        );
+
         let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(API_KEYS)?;
-            let data = bincode::serialize(api_key)?;
+            let data = rmp_serde::to_vec(api_key)?;
             table.insert(api_key.key_hash.as_str(), data.as_slice())?;
 
             // Update resource_api_keys index
             let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
             let mut key_hashes: Vec<String> = index_table
                 .get(api_key.subject_id.as_str())?
-                .map(|v| bincode::deserialize(v.value()).unwrap_or_default())
+                .map(|v| rmp_serde::from_slice(v.value()).unwrap_or_default())
                 .unwrap_or_default();
 
             if !key_hashes.contains(&api_key.key_hash) {
                 key_hashes.push(api_key.key_hash.clone());
-                let index_data = bincode::serialize(&key_hashes)?;
+                let index_data = rmp_serde::to_vec(&key_hashes)?;
                 index_table.insert(api_key.subject_id.as_str(), index_data.as_slice())?;
             }
 
@@ -299,7 +348,7 @@ impl Database {
 
         match table.get(key_hash)? {
             Some(data) => {
-                let api_key: ApiKey = bincode::deserialize(data.value())?;
+                let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
                 Ok(Some(api_key))
             }
             None => Ok(None),
@@ -321,7 +370,7 @@ impl Database {
             let table = write_txn.open_table(API_KEYS)?;
             let result = match table.get(key_hash)? {
                 Some(data) => {
-                    let api_key: ApiKey = bincode::deserialize(data.value())?;
+                    let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
                     Some(api_key)
                 }
                 None => None,
@@ -340,8 +389,9 @@ impl Database {
                 if let Some(s) = scopes {
                     api_key.scopes = s.to_vec();
                 }
+                api_key.updated_at = Some(chrono::Utc::now());
 
-                let serialized = bincode::serialize(&api_key)?;
+                let serialized = rmp_serde::to_vec(&api_key)?;
                 let mut table = write_txn.open_table(API_KEYS)?;
                 table.insert(key_hash, serialized.as_slice())?;
                 true
@@ -374,7 +424,7 @@ impl Database {
             let result = table.get(key_hash)?;
             match result {
                 Some(data) => {
-                    let api_key: ApiKey = bincode::deserialize(data.value())?;
+                    let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
                     Some((api_key.subject_id, api_key.id))
                 }
                 None => None,
@@ -394,7 +444,7 @@ impl Database {
                     let index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
                     let result = index_table.get(subject_id.as_str())?;
                     match result {
-                        Some(data) => Some(bincode::deserialize(data.value())?),
+                        Some(data) => Some(rmp_serde::from_slice(data.value())?),
                         None => None,
                     }
                 };
@@ -405,7 +455,7 @@ impl Database {
                     if hashes.is_empty() {
                         index_table.remove(subject_id.as_str())?;
                     } else {
-                        let new_index_data = bincode::serialize(&hashes)?;
+                        let new_index_data = rmp_serde::to_vec(&hashes)?;
                         index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
@@ -432,19 +482,49 @@ impl Database {
         let keys_table = read_txn.open_table(API_KEYS)?;
 
         let key_hashes: Vec<String> = match index_table.get(subject_id)? {
-            Some(data) => bincode::deserialize(data.value())?,
+            Some(data) => rmp_serde::from_slice(data.value())?,
             None => return Ok(Vec::new()),
         };
 
         let mut api_keys = Vec::new();
         for key_hash in key_hashes {
             if let Some(data) = keys_table.get(key_hash.as_str())? {
-                let api_key: ApiKey = bincode::deserialize(data.value())?;
+                let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
                 api_keys.push(api_key);
             }
         }
 
         Ok(api_keys)
+    }
+
+    /// Get an API key by its UUID (resolves ID -> key_hash -> api_key)
+    pub fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>, DatabaseError> {
+        let key_hash = match self.get_api_key_hash_by_id(id)? {
+            Some(h) => h,
+            None => return Ok(None),
+        };
+        self.get_api_key(&key_hash)
+    }
+
+    /// Update last_used_at for an API key (local-only, no replication)
+    pub fn touch_api_key(&self, key_hash: &str) -> Result<(), DatabaseError> {
+        let write_txn = self.begin_write()?;
+        let existing = {
+            let table = write_txn.open_table(API_KEYS)?;
+            let result = match table.get(key_hash)? {
+                Some(data) => Some(rmp_serde::from_slice::<ApiKey>(data.value())?),
+                None => None,
+            };
+            result
+        };
+        if let Some(mut api_key) = existing {
+            api_key.last_used_at = Some(chrono::Utc::now());
+            let serialized = rmp_serde::to_vec(&api_key)?;
+            let mut table = write_txn.open_table(API_KEYS)?;
+            table.insert(key_hash, serialized.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
     }
 
     /// Get all API keys (for expiration cleanup)
@@ -455,7 +535,7 @@ impl Database {
         let mut keys = Vec::new();
         for result in table.iter()? {
             let (_, value) = result?;
-            let api_key: ApiKey = bincode::deserialize(value.value())?;
+            let api_key: ApiKey = rmp_serde::from_slice(value.value())?;
             keys.push(api_key);
         }
 
@@ -473,7 +553,7 @@ impl Database {
 
         match table.get("state")? {
             Some(data) => {
-                let state: NodeState = bincode::deserialize(data.value())?;
+                let state: NodeState = rmp_serde::from_slice(data.value())?;
                 Ok(Some(state))
             }
             None => Ok(None),
@@ -485,7 +565,7 @@ impl Database {
         let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(NODE_META)?;
-            let data = bincode::serialize(state)?;
+            let data = rmp_serde::to_vec(state)?;
             table.insert("state", data.as_slice())?;
         }
         write_txn.commit()?;
@@ -501,7 +581,7 @@ impl Database {
         let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(REPLICATION_LOG)?;
-            let data = bincode::serialize(write)?;
+            let data = rmp_serde::to_vec(write)?;
             table.insert(write.sequence, data.as_slice())?;
         }
         write_txn.commit()?;
@@ -519,7 +599,7 @@ impl Database {
         let mut entries = Vec::new();
         for result in table.range(from_sequence..)? {
             let (_, value) = result?;
-            let entry: ReplicatedWrite = bincode::deserialize(value.value())?;
+            let entry: ReplicatedWrite = rmp_serde::from_slice(value.value())?;
             entries.push(entry);
         }
 
