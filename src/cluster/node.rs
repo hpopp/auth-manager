@@ -57,7 +57,9 @@ impl ClusterState {
         // Load persisted state or create new
         let node_state = db.get_node_state()?.unwrap_or_else(|| {
             let state = NodeState::new(config.node.id.clone());
-            let _ = db.put_node_state(&state);
+            if let Err(e) = db.put_node_state(&state) {
+                tracing::error!(error = %e, "Failed to persist initial node state");
+            }
             state
         });
 
@@ -94,6 +96,10 @@ impl ClusterState {
         self.votes_received = 1; // Vote for self
         self.leader_id = None;
         tracing::info!(term = self.current_term, "Starting election");
+
+        debug_assert_eq!(self.role, Role::Candidate);
+        debug_assert_eq!(self.votes_received, 1);
+        debug_assert!(self.leader_id.is_none());
     }
 
     /// Become leader
@@ -101,6 +107,9 @@ impl ClusterState {
         self.role = Role::Leader;
         self.leader_id = Some(node_id.to_string());
         tracing::info!(term = self.current_term, "Became leader");
+
+        debug_assert_eq!(self.role, Role::Leader);
+        debug_assert!(self.leader_id.is_some());
     }
 
     /// Become follower
@@ -111,11 +120,25 @@ impl ClusterState {
         self.leader_address = None; // Will be set by next heartbeat
         self.votes_received = 0;
         self.voted_for = None;
+
+        debug_assert_eq!(self.role, Role::Follower);
+        debug_assert_eq!(self.current_term, term);
+        debug_assert_eq!(self.votes_received, 0);
+        debug_assert!(self.voted_for.is_none());
     }
 
     /// Record a vote received
     pub fn record_vote(&mut self) {
+        debug_assert_eq!(
+            self.role,
+            Role::Candidate,
+            "only candidates should receive votes"
+        );
         self.votes_received += 1;
+        debug_assert!(
+            self.votes_received <= self.cluster_size(),
+            "votes cannot exceed cluster size"
+        );
     }
 
     /// Check if we have enough votes to become leader

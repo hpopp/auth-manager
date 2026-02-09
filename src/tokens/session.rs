@@ -45,14 +45,18 @@ pub fn create(
 pub fn validate(db: &Database, token: &str) -> Result<Option<SessionToken>, SessionError> {
     match db.get_session(token)? {
         Some(session) => {
-            if session.expires_at < Utc::now() {
+            if session.is_expired_at(Utc::now()) {
                 // Token is expired - delete it and return None
-                let _ = db.delete_session(token);
+                if let Err(e) = db.delete_session(token) {
+                    tracing::warn!(error = %e, id = %session.id, "Failed to delete expired session");
+                }
                 tracing::debug!(id = %session.id, "Session token expired");
                 Ok(None)
             } else {
                 // Update last_used_at (local-only, best-effort)
-                let _ = db.touch_session(token);
+                if let Err(e) = db.touch_session(token) {
+                    tracing::warn!(error = %e, id = %session.id, "Failed to update session last_used_at");
+                }
                 Ok(Some(session))
             }
         }
@@ -77,7 +81,7 @@ pub fn list_by_subject(db: &Database, subject_id: &str) -> Result<Vec<SessionTok
     // Filter out expired sessions
     Ok(sessions
         .into_iter()
-        .filter(|s| s.expires_at > now)
+        .filter(|s| !s.is_expired_at(now))
         .collect())
 }
 
@@ -88,7 +92,7 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, SessionError> {
     let mut cleaned = 0;
 
     for session in sessions {
-        if session.expires_at < now && db.delete_session(&session.token)? {
+        if session.is_expired_at(now) && db.delete_session(&session.token)? {
             cleaned += 1;
         }
     }

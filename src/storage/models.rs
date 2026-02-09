@@ -73,6 +73,21 @@ pub struct ApiKey {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
+impl SessionToken {
+    /// Pure check: is this session expired at the given time?
+    pub fn is_expired_at(&self, now: DateTime<Utc>) -> bool {
+        self.expires_at < now
+    }
+}
+
+impl ApiKey {
+    /// Pure check: is this API key expired at the given time?
+    /// Returns false if no expiration is set.
+    pub fn is_expired_at(&self, now: DateTime<Utc>) -> bool {
+        self.expires_at.map(|exp| exp < now).unwrap_or(false)
+    }
+}
+
 /// A write operation for replication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplicatedWrite {

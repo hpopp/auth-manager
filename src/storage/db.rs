@@ -108,6 +108,13 @@ impl Database {
 
     /// Store a session token
     pub fn put_session(&self, session: &SessionToken) -> Result<(), DatabaseError> {
+        debug_assert!(!session.token.is_empty(), "session token must not be empty");
+        debug_assert!(!session.id.is_empty(), "session id must not be empty");
+        debug_assert!(
+            !session.subject_id.is_empty(),
+            "session subject_id must not be empty"
+        );
+
         let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(SESSIONS)?;
@@ -297,6 +304,16 @@ impl Database {
 
     /// Store an API key
     pub fn put_api_key(&self, api_key: &ApiKey) -> Result<(), DatabaseError> {
+        debug_assert!(
+            !api_key.key_hash.is_empty(),
+            "API key hash must not be empty"
+        );
+        debug_assert!(!api_key.id.is_empty(), "API key id must not be empty");
+        debug_assert!(
+            !api_key.subject_id.is_empty(),
+            "API key subject_id must not be empty"
+        );
+
         let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(API_KEYS)?;
