@@ -34,6 +34,9 @@ pub struct SessionToken {
     pub expires_at: DateTime<Utc>,
     /// Non-secret UUID identifier (used for listing, revoking)
     pub id: String,
+    /// When the token was last used for validation
+    #[serde(default)]
+    pub last_used_at: Option<DateTime<Utc>>,
     /// The actor (user, service, device, etc.)
     pub subject_id: String,
     /// Opaque secret token (32-byte hex, used for verification)
@@ -53,6 +56,9 @@ pub struct ApiKey {
     pub id: String,
     /// Hash of the actual key (we don't store the plaintext)
     pub key_hash: String,
+    /// When the key was last used for validation
+    #[serde(default)]
+    pub last_used_at: Option<DateTime<Utc>>,
     /// Human-readable name for the key
     pub name: String,
     /// The actor (user, service, device, etc.)

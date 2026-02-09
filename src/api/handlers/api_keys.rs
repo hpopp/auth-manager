@@ -49,6 +49,7 @@ pub struct ApiKeyResponse {
     pub description: Option<String>,
     pub expires_at: Option<String>,
     pub id: String,
+    pub last_used_at: Option<String>,
     pub name: String,
     pub subject_id: String,
     pub scopes: Vec<String>,
@@ -99,6 +100,7 @@ pub async fn create_api_key(
         expires_at,
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
+        last_used_at: None,
         name: req.name.clone(),
         subject_id: req.subject_id.clone(),
         scopes: req.scopes.clone(),
@@ -168,6 +170,26 @@ pub async fn update_api_key(
 
     tracing::debug!(id = %id, "Updated API key");
     Ok(JSend::success(api_key_to_response(&api_key_record)))
+}
+
+pub async fn get_api_key(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<JSend<ApiKeyResponse>>, ApiError> {
+    let api_key = state
+        .db
+        .get_api_key_by_id(&id)
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("API key not found"))?;
+
+    // Filter out expired keys
+    if let Some(expires_at) = api_key.expires_at {
+        if expires_at < Utc::now() {
+            return Err(ApiError::not_found("API key not found"));
+        }
+    }
+
+    Ok(JSend::success(api_key_to_response(&api_key)))
 }
 
 pub async fn validate_api_key(
@@ -272,6 +294,7 @@ fn api_key_to_response(api_key: &ApiKeyModel) -> ApiKeyResponse {
         description: api_key.description.clone(),
         expires_at: api_key.expires_at.map(|t| t.to_rfc3339()),
         id: api_key.id.clone(),
+        last_used_at: api_key.last_used_at.map(|t| t.to_rfc3339()),
         name: api_key.name.clone(),
         subject_id: api_key.subject_id.clone(),
         scopes: api_key.scopes.clone(),

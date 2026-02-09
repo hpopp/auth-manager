@@ -1,0 +1,56 @@
+meta {
+  name: Get Session
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/sessions/{{sessionId}}
+  body: none
+  auth: none
+}
+
+docs {
+  # Get Session
+  
+  Retrieves a single session by its UUID.
+  
+  ## Path Parameters
+  
+  | Field | Type   | Description             |
+  |-------|--------|-------------------------|
+  | id    | string | UUID of the session     |
+  
+  ## Response
+  
+  ```json
+  {
+    "status": "success",
+    "data": {
+      "created_at": "2026-02-08T10:00:00Z",
+      "device_info": {
+        "browser": "Chrome",
+        "browser_version": "120.0.0.0",
+        "kind": "Desktop",
+        "os": "Mac OS X",
+        "os_version": "10.15"
+      },
+      "expires_at": "2026-02-08T11:00:00Z",
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "last_used_at": "2026-02-09T15:30:00Z",
+      "subject_id": "user-123"
+    }
+  }
+  ```
+  
+  Returns 404 if the session does not exist or is expired:
+  
+  ```json
+  {
+    "status": "fail",
+    "data": {
+      "message": "Session not found"
+    }
+  }
+  ```
+}

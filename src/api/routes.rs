@@ -28,11 +28,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 
     // Read routes -- any node can serve these
     let read_routes = Router::new()
+        .route("/api-keys/:id", get(handlers::get_api_key))
         .route(
             "/api-keys/subject/:subject_id",
             get(handlers::list_api_keys),
         )
         .route("/api-keys/verify", post(handlers::validate_api_key))
+        .route("/sessions/:id", get(handlers::get_session))
         .route(
             "/sessions/subject/:subject_id",
             get(handlers::list_sessions),

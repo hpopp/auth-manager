@@ -29,6 +29,7 @@ pub fn create(
         device_info,
         expires_at: now + Duration::seconds(ttl_seconds as i64),
         id: uuid::Uuid::new_v4().to_string(),
+        last_used_at: None,
         subject_id: subject_id.to_string(),
         token: generate_token(),
     };
@@ -49,6 +50,8 @@ pub fn validate(db: &Database, token: &str) -> Result<Option<SessionToken>, Sess
                 tracing::debug!(id = %session.id, "Session token expired");
                 Ok(None)
             } else {
+                // Update last_used_at (local-only, best-effort)
+                let _ = db.touch_session(token);
                 Ok(Some(session))
             }
         }

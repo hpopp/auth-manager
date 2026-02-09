@@ -36,6 +36,7 @@ pub fn create(
         expires_at,
         id: uuid::Uuid::new_v4().to_string(),
         key_hash: key_hash.clone(),
+        last_used_at: None,
         name: name.to_string(),
         subject_id: subject_id.to_string(),
         scopes,
@@ -61,6 +62,8 @@ pub fn validate(db: &Database, key: &str) -> Result<Option<ApiKey>, ApiKeyError>
                     return Ok(None);
                 }
             }
+            // Update last_used_at (local-only, best-effort)
+            let _ = db.touch_api_key(&key_hash);
             Ok(Some(api_key))
         }
         None => Ok(None),

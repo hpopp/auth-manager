@@ -40,6 +40,7 @@ pub struct SessionResponse {
     pub device_info: DeviceInfoResponse,
     pub expires_at: String,
     pub id: String,
+    pub last_used_at: Option<String>,
     pub subject_id: String,
 }
 
@@ -83,6 +84,7 @@ pub async fn create_session(
         device_info,
         expires_at: now + chrono::Duration::seconds(ttl as i64),
         id: uuid::Uuid::new_v4().to_string(),
+        last_used_at: None,
         subject_id: req.subject_id.clone(),
         token: generate_token(),
     };
@@ -104,6 +106,24 @@ pub async fn create_session(
         id: session.id,
         token: session.token,
     }))
+}
+
+pub async fn get_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<JSend<SessionResponse>>, ApiError> {
+    let session = state
+        .db
+        .get_session_by_id(&id)
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("Session not found"))?;
+
+    // Filter out expired sessions
+    if session.expires_at < Utc::now() {
+        return Err(ApiError::not_found("Session not found"));
+    }
+
+    Ok(JSend::success(session_to_response(&session)))
 }
 
 pub async fn validate_session(
@@ -189,6 +209,7 @@ fn session_to_response(session: &SessionToken) -> SessionResponse {
         },
         expires_at: session.expires_at.to_rfc3339(),
         id: session.id.clone(),
+        last_used_at: session.last_used_at.map(|t| t.to_rfc3339()),
         subject_id: session.subject_id.clone(),
     }
 }
