@@ -134,9 +134,9 @@ pub fn detect_local_ip() -> Option<IpAddr> {
 /// Compute the advertise address for this node
 ///
 /// This is the address other nodes should use to reach us (e.g., for leader forwarding).
-/// Priority: AUTH_MANAGER_ADVERTISE_ADDRESS env var > auto-detected IP + bind port
+/// Priority: ADVERTISE_ADDRESS env var > auto-detected IP + bind port
 pub fn compute_advertise_address(bind_address: &str) -> String {
-    if let Ok(addr) = std::env::var("AUTH_MANAGER_ADVERTISE_ADDRESS") {
+    if let Ok(addr) = std::env::var("ADVERTISE_ADDRESS") {
         return addr;
     }
 
