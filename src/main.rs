@@ -104,15 +104,53 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&config.node.bind_address).await?;
     info!("Listening on: {}", config.node.bind_address);
 
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
-    // Cleanup
+    // Cleanup: abort background tasks
+    info!("Shutting down background tasks");
     expiration_handle.abort();
     if let Some(handle) = cluster_handle {
         handle.abort();
     }
 
+    // Persist cluster state to disk
+    {
+        let cluster = state.cluster.read().await;
+        if let Err(e) = cluster.persist(&state.db, &config.node.id) {
+            tracing::error!(error = %e, "Failed to persist cluster state during shutdown");
+        }
+    }
+
+    info!("Shutdown complete");
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    info!("Shutdown signal received, draining connections");
 }
 
 /// Build the appropriate discovery strategy from configuration
