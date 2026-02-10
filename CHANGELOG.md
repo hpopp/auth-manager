@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optionally create an API key with a client-provided value. Useful for migrations.
 - `GET /api-keys` to list all API keys. Optionally filter by `subject_id`.
 - `GET /sessions` to list all sessions. Optionally filter by `subject_id`.
+- E2E test suite with Hurl (+ CI job).
 
 ### Removed
 
