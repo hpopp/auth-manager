@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Device kind detected from User-Agent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -40,6 +41,9 @@ pub struct SessionToken {
     /// When the token was last used for validation
     #[serde(default)]
     pub last_used_at: Option<DateTime<Utc>>,
+    /// Arbitrary client-supplied key-value data (e.g. user profile info)
+    #[serde(default)]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
     /// The actor (user, service, device, etc.)
     pub subject_id: String,
     /// Opaque secret token (32-byte hex, used for verification)

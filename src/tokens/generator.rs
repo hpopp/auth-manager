@@ -1,17 +1,16 @@
 use rand::Rng;
 
-/// Generate a secure random token (32 bytes, hex encoded = 64 characters)
-pub fn generate_token() -> String {
+/// Generate a secure random hex string with an optional prefix.
+///
+/// - Session tokens: `generate_hex(32, None)` → 64-char hex
+/// - API keys: `generate_hex(24, Some("am_"))` → `am_` + 48-char hex
+pub fn generate_hex(len: usize, prefix: Option<&str>) -> String {
     let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
-    hex::encode(bytes)
-}
-
-/// Generate a secure random API key with a prefix
-pub fn generate_api_key() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 24] = rng.gen();
-    format!("am_{}", hex::encode(bytes))
+    let bytes: Vec<u8> = (0..len).map(|_| rng.gen()).collect();
+    match prefix {
+        Some(p) => format!("{p}{}", hex::encode(bytes)),
+        None => hex::encode(bytes),
+    }
 }
 
 /// Hash a string using SHA-256 (for API key storage)
@@ -30,18 +29,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_token() {
-        let token = generate_token();
+    fn test_generate_hex_token() {
+        let token = generate_hex(32, None);
         assert_eq!(token.len(), 64); // 32 bytes * 2 hex chars
 
-        // Ensure randomness
-        let token2 = generate_token();
+        let token2 = generate_hex(32, None);
         assert_ne!(token, token2);
     }
 
     #[test]
-    fn test_generate_api_key() {
-        let key = generate_api_key();
+    fn test_generate_hex_api_key() {
+        let key = generate_hex(24, Some("am_"));
         assert!(key.starts_with("am_"));
         assert_eq!(key.len(), 3 + 48); // "am_" + 24 bytes * 2 hex chars
     }

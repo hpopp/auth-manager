@@ -10,7 +10,7 @@ use crate::cluster::replicate_write;
 use crate::storage::models::{ApiKey as ApiKeyModel, WriteOp};
 use crate::tokens::{
     api_key,
-    generator::{generate_api_key, hash_key},
+    generator::{generate_hex, hash_key},
 };
 use crate::AppState;
 
@@ -89,7 +89,7 @@ pub async fn create_api_key(
         })
         .transpose()?;
 
-    let key = generate_api_key();
+    let key = generate_hex(24, Some("am_"));
     let key_hash = hash_key(&key);
     let now = Utc::now();
 

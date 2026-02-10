@@ -3,6 +3,7 @@
 use auth_manager::storage::models::{DeviceInfo, SessionToken};
 use auth_manager::storage::Database;
 use chrono::Utc;
+use std::collections::HashMap;
 use tempfile::TempDir;
 
 fn setup_db() -> (Database, TempDir) {
@@ -20,6 +21,7 @@ fn make_session(id: &str, subject: &str) -> SessionToken {
         id: id.to_string(),
         ip_address: None,
         last_used_at: None,
+        metadata: None,
         subject_id: subject.to_string(),
         token: format!("tok_{id}"),
     }
@@ -105,4 +107,98 @@ async fn test_multiple_sessions_per_subject() {
     let sessions = auth_manager::tokens::session::list_by_subject(&db, "user-456").unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, s2.id);
+}
+
+#[tokio::test]
+async fn test_session_with_metadata() {
+    let (db, _temp) = setup_db();
+
+    let mut metadata = HashMap::new();
+    metadata.insert("name".to_string(), serde_json::json!("Jane Doe"));
+    metadata.insert(
+        "image".to_string(),
+        serde_json::json!("https://example.com/avatar.png"),
+    );
+    metadata.insert("is_admin".to_string(), serde_json::json!(true));
+
+    let now = Utc::now();
+    let session = SessionToken {
+        created_at: now,
+        device_info: DeviceInfo::default(),
+        expires_at: now + chrono::Duration::hours(24),
+        id: "s-meta".to_string(),
+        ip_address: None,
+        last_used_at: None,
+        metadata: Some(metadata),
+        subject_id: "user@example.com".to_string(),
+        token: "tok_s-meta".to_string(),
+    };
+    db.put_session(&session).unwrap();
+
+    // Validate and verify metadata roundtrips
+    let validated = auth_manager::tokens::session::validate(&db, &session.token)
+        .unwrap()
+        .expect("session should be valid");
+
+    let meta = validated.metadata.expect("metadata should be present");
+    assert_eq!(meta.get("name").unwrap(), &serde_json::json!("Jane Doe"));
+    assert_eq!(meta.get("is_admin").unwrap(), &serde_json::json!(true));
+    assert_eq!(
+        meta.get("image").unwrap(),
+        &serde_json::json!("https://example.com/avatar.png")
+    );
+}
+
+#[tokio::test]
+async fn test_session_without_metadata_roundtrips_as_none() {
+    let (db, _temp) = setup_db();
+
+    let session = make_session("s-no-meta", "user-000");
+    db.put_session(&session).unwrap();
+
+    let validated = auth_manager::tokens::session::validate(&db, &session.token)
+        .unwrap()
+        .expect("session should be valid");
+
+    assert!(validated.metadata.is_none());
+}
+
+#[tokio::test]
+async fn test_session_metadata_with_nested_values() {
+    let (db, _temp) = setup_db();
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "preferences".to_string(),
+        serde_json::json!({"theme": "dark", "locale": "en-US"}),
+    );
+    metadata.insert("tags".to_string(), serde_json::json!(["admin", "beta"]));
+
+    let now = Utc::now();
+    let session = SessionToken {
+        created_at: now,
+        device_info: DeviceInfo::default(),
+        expires_at: now + chrono::Duration::hours(24),
+        id: "s-nested".to_string(),
+        ip_address: None,
+        last_used_at: None,
+        metadata: Some(metadata),
+        subject_id: "user-nested".to_string(),
+        token: "tok_s-nested".to_string(),
+    };
+    db.put_session(&session).unwrap();
+
+    let validated = auth_manager::tokens::session::validate(&db, &session.token)
+        .unwrap()
+        .expect("session should be valid");
+
+    let meta = validated.metadata.expect("metadata should be present");
+    assert_eq!(
+        meta.get("preferences").unwrap(),
+        &serde_json::json!({"theme": "dark", "locale": "en-US"})
+    );
+    assert_eq!(
+        meta.get("tags").unwrap(),
+        &serde_json::json!(["admin", "beta"])
+    );
 }

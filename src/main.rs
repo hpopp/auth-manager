@@ -10,8 +10,8 @@ use tokio::sync::RwLock;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "auth_manager=debug,tower_http=debug".into());
+    let env_filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
 
     let log_format = std::env::var("LOG_FORMAT").unwrap_or_default();
     match log_format.to_lowercase().as_str() {
