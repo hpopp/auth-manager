@@ -1,31 +1,32 @@
+# Benchmark Results
+/benchmarks/results/
+
 # Build artifacts
 /target/
-debug/
 *.pdb
+debug/
 
 # Database files
 /data/
 *.redb
 
+# Editor / IDE
+.idea/
+.vscode/
+*.code-workspace
+*.swo
+*.swp
+*~
+
 # Environment and secrets
 .env
 .env.*
-*.pem
 *.key
+*.pem
 
-# Editor / IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Benchmark Results
-/benchmarks/results/
+# Logs
+*.log
 
 # OS files
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
