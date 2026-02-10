@@ -4,7 +4,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::{replication_error, PaginationParams};
+use super::{replication_error, ListParams};
 use crate::api::response::{ApiError, AppJson, AppQuery, JSend, JSendPaginated, Pagination};
 use crate::cluster::replicate_write;
 use crate::storage::models::{ApiKey as ApiKeyModel, WriteOp};
@@ -24,6 +24,9 @@ pub struct CreateApiKeyRequest {
     pub description: Option<String>,
     #[serde(default)]
     pub expires_at: Option<String>,
+    /// Optional pre-set key value (for migration). If omitted, a random key is generated.
+    #[serde(default)]
+    pub key: Option<String>,
     pub name: String,
     pub subject_id: String,
     #[serde(default)]
@@ -89,7 +92,10 @@ pub async fn create_api_key(
         })
         .transpose()?;
 
-    let key = generate_hex(24, Some("am_"));
+    let key = match req.key {
+        Some(ref k) if !k.trim().is_empty() => k.clone(),
+        _ => generate_hex(24),
+    };
     let key_hash = hash_key(&key);
     let now = Utc::now();
 
@@ -237,26 +243,25 @@ pub async fn revoke_api_key(
 
 pub async fn list_api_keys(
     State(state): State<Arc<AppState>>,
-    Path(subject_id): Path<String>,
-    AppQuery(params): AppQuery<PaginationParams>,
+    AppQuery(params): AppQuery<ListParams>,
 ) -> Result<Json<JSendPaginated<ApiKeyResponse>>, ApiError> {
-    params.validate()?;
+    params.pagination.validate()?;
 
-    match api_key::list_by_subject(&state.db, &subject_id) {
+    match api_key::list(&state.db, params.subject_id.as_deref()) {
         Ok(keys) => {
             let total = keys.len() as u64;
             let items: Vec<ApiKeyResponse> = keys
                 .iter()
-                .skip(params.offset as usize)
-                .take(params.limit as usize)
+                .skip(params.pagination.offset as usize)
+                .take(params.pagination.limit as usize)
                 .map(api_key_to_response)
                 .collect();
 
             Ok(JSendPaginated::success(
                 items,
                 Pagination {
-                    limit: params.limit,
-                    offset: params.offset,
+                    limit: params.pagination.limit,
+                    offset: params.pagination.offset,
                     total,
                 },
             ))

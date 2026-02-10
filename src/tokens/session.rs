@@ -37,9 +37,12 @@ pub fn validate(db: &Database, token: &str) -> Result<Option<SessionToken>, Sess
     }
 }
 
-/// List all sessions for a resource
-pub fn list_by_subject(db: &Database, subject_id: &str) -> Result<Vec<SessionToken>, SessionError> {
-    let sessions = db.get_sessions_by_subject(subject_id)?;
+/// List sessions, optionally filtered by subject_id
+pub fn list(db: &Database, subject_id: Option<&str>) -> Result<Vec<SessionToken>, SessionError> {
+    let sessions = match subject_id {
+        Some(id) => db.get_sessions_by_subject(id)?,
+        None => db.get_all_sessions()?,
+    };
     let now = Utc::now();
 
     // Filter out expired sessions
@@ -104,12 +107,23 @@ mod tests {
             db.put_session(&make_session(id, subject)).unwrap();
         }
 
-        assert_eq!(list_by_subject(&db, "user123").unwrap().len(), 2);
-        assert_eq!(list_by_subject(&db, "user456").unwrap().len(), 1);
+        assert_eq!(list(&db, Some("user123")).unwrap().len(), 2);
+        assert_eq!(list(&db, Some("user456")).unwrap().len(), 1);
     }
 
     #[test]
-    fn test_list_by_subject_pagination() {
+    fn test_list_all() {
+        let (db, _temp) = setup_db();
+
+        for (id, subject) in [("s1", "user123"), ("s2", "user123"), ("s3", "user456")] {
+            db.put_session(&make_session(id, subject)).unwrap();
+        }
+
+        assert_eq!(list(&db, None).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_list_pagination() {
         let (db, _temp) = setup_db();
 
         for i in 0..5 {
@@ -117,7 +131,7 @@ mod tests {
                 .unwrap();
         }
 
-        let all = list_by_subject(&db, "user123").unwrap();
+        let all = list(&db, Some("user123")).unwrap();
         assert_eq!(all.len(), 5);
 
         assert_eq!(all.iter().skip(0).take(2).count(), 2);

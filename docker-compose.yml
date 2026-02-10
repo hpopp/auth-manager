@@ -8,7 +8,7 @@ x-common-env: &common-env
   BIND_ADDRESS: "0.0.0.0:8080"
   DATA_DIR: /data
   DISCOVERY_DNS_NAME: auth-manager
-  RUST_LOG: auth_manager=debug
+  RUST_LOG: auth_manager=debug,tower_http=debug
   TEST_MODE: "true"
 
 x-common: &common

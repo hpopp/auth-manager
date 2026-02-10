@@ -94,17 +94,17 @@ async fn test_multiple_sessions_per_subject() {
     db.put_session(&s3).unwrap();
 
     // List sessions by subject
-    let sessions = auth_manager::tokens::session::list_by_subject(&db, "user-456").unwrap();
+    let sessions = auth_manager::tokens::session::list(&db, Some("user-456")).unwrap();
     assert_eq!(sessions.len(), 2);
 
-    let sessions = auth_manager::tokens::session::list_by_subject(&db, "user-789").unwrap();
+    let sessions = auth_manager::tokens::session::list(&db, Some("user-789")).unwrap();
     assert_eq!(sessions.len(), 1);
 
     // Revoke one session (by token)
     db.delete_session(&s1.token).unwrap();
 
     // Verify only one remains
-    let sessions = auth_manager::tokens::session::list_by_subject(&db, "user-456").unwrap();
+    let sessions = auth_manager::tokens::session::list(&db, Some("user-456")).unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, s2.id);
 }

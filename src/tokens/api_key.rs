@@ -40,9 +40,12 @@ pub fn validate(db: &Database, key: &str) -> Result<Option<ApiKey>, ApiKeyError>
     }
 }
 
-/// List all API keys for a resource
-pub fn list_by_subject(db: &Database, subject_id: &str) -> Result<Vec<ApiKey>, ApiKeyError> {
-    let keys = db.get_api_keys_by_subject(subject_id)?;
+/// List API keys, optionally filtered by subject_id
+pub fn list(db: &Database, subject_id: Option<&str>) -> Result<Vec<ApiKey>, ApiKeyError> {
+    let keys = match subject_id {
+        Some(id) => db.get_api_keys_by_subject(id)?,
+        None => db.get_all_api_keys()?,
+    };
     let now = Utc::now();
 
     // Filter out expired keys
@@ -104,21 +107,32 @@ mod tests {
             db.put_api_key(&make_api_key(id, subject)).unwrap();
         }
 
-        assert_eq!(list_by_subject(&db, "user-123").unwrap().len(), 2);
-        assert_eq!(list_by_subject(&db, "user-456").unwrap().len(), 1);
-        assert_eq!(list_by_subject(&db, "user-999").unwrap().len(), 0);
+        assert_eq!(list(&db, Some("user-123")).unwrap().len(), 2);
+        assert_eq!(list(&db, Some("user-456")).unwrap().len(), 1);
+        assert_eq!(list(&db, Some("user-999")).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_list_all() {
+        let (db, _temp) = setup_db();
+
+        for (id, subject) in [("k1", "user-123"), ("k2", "user-123"), ("k3", "user-456")] {
+            db.put_api_key(&make_api_key(id, subject)).unwrap();
+        }
+
+        assert_eq!(list(&db, None).unwrap().len(), 3);
     }
 
     #[test]
     fn test_invalid_key_returns_none() {
         let (db, _temp) = setup_db();
 
-        let result = validate(&db, "am_invalid_key_that_does_not_exist").unwrap();
+        let result = validate(&db, "invalid_key_that_does_not_exist").unwrap();
         assert!(result.is_none());
     }
 
     #[test]
-    fn test_list_by_subject_pagination() {
+    fn test_list_pagination() {
         let (db, _temp) = setup_db();
 
         for i in 0..5 {
@@ -126,7 +140,7 @@ mod tests {
                 .unwrap();
         }
 
-        let all = list_by_subject(&db, "user-123").unwrap();
+        let all = list(&db, Some("user-123")).unwrap();
         assert_eq!(all.len(), 5);
 
         assert_eq!(all.iter().skip(0).take(2).count(), 2);

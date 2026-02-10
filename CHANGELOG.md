@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Sessions now support generic `metadata`.
+- Optionally create an API key with a client-provided value. Useful for migrations.
+
+### Removed
+
+- API keys no longer have a string prefix.
 
 ## [0.3.0] - 2026-02-10
 

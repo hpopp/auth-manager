@@ -26,6 +26,14 @@ impl PaginationParams {
     }
 }
 
+/// Query parameters for list endpoints (pagination + optional subject filter)
+#[derive(Debug, Deserialize)]
+pub struct ListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    pub subject_id: Option<String>,
+}
+
 fn default_limit() -> u32 {
     20
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{replication_error, PaginationParams};
+use super::{replication_error, ListParams};
 use crate::api::response::{ApiError, AppJson, AppQuery, JSend, JSendPaginated, Pagination};
 use crate::cluster::replicate_write;
 use crate::device::parse_user_agent;
@@ -94,7 +94,7 @@ pub async fn create_session(
         last_used_at: None,
         metadata: req.metadata.clone(),
         subject_id: req.subject_id.clone(),
-        token: generate_hex(32, None),
+        token: generate_hex(32),
     };
 
     let operation = WriteOp::CreateSession(session.clone());
@@ -179,26 +179,25 @@ pub async fn revoke_session(
 
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
-    Path(subject_id): Path<String>,
-    AppQuery(params): AppQuery<PaginationParams>,
+    AppQuery(params): AppQuery<ListParams>,
 ) -> Result<Json<JSendPaginated<SessionResponse>>, ApiError> {
-    params.validate()?;
+    params.pagination.validate()?;
 
-    match session::list_by_subject(&state.db, &subject_id) {
+    match session::list(&state.db, params.subject_id.as_deref()) {
         Ok(sessions) => {
             let total = sessions.len() as u64;
             let items: Vec<SessionResponse> = sessions
                 .iter()
-                .skip(params.offset as usize)
-                .take(params.limit as usize)
+                .skip(params.pagination.offset as usize)
+                .take(params.pagination.limit as usize)
                 .map(session_to_response)
                 .collect();
 
             Ok(JSendPaginated::success(
                 items,
                 Pagination {
-                    limit: params.limit,
-                    offset: params.offset,
+                    limit: params.pagination.limit,
+                    offset: params.pagination.offset,
                     total,
                 },
             ))
