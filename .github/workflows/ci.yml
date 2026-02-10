@@ -130,9 +130,7 @@ jobs:
             "$IMAGE"
           until curl -sf http://localhost:8080/_internal/health; do sleep 1; done
       - name: Install Hurl
-        run: |
-          curl -fsSL https://github.com/Orange-OpenSource/hurl/releases/latest/download/hurl_amd64.deb -o hurl.deb
-          sudo dpkg -i hurl.deb
+        uses: gacts/install-hurl@v1
       - name: Run E2E tests
         run: hurl --test e2e/*.hurl --variable host=localhost --variable port=8080
       - name: Stop container
