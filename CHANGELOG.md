@@ -9,7 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `limit`/`offset` pagination for listing sessions and API keys by resource. [#4](https://github.com/hpopp/auth-manager/pull/4)
+- `limit`/`offset` pagination for listing sessions and API keys by resource.
+- Snapshot replication to stale followers.
+
+### Removed
+
+- Cleaned up various unused legacy functions.
+
+[#4](https://github.com/hpopp/auth-manager/pull/4)
 
 ## [0.2.0] - 2026-02-09
 

@@ -83,11 +83,6 @@ impl ClusterState {
         })
     }
 
-    /// Check if this node is the leader
-    pub fn is_leader(&self) -> bool {
-        self.role == Role::Leader
-    }
-
     /// Start a new election
     pub fn start_election(&mut self, node_id: &str) {
         self.current_term += 1;

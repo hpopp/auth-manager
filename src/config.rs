@@ -241,12 +241,6 @@ impl Config {
         Ok(())
     }
 
-    /// Calculate the quorum size for the cluster
-    pub fn quorum_size(&self) -> usize {
-        let cluster_size = self.cluster.peers.len() + 1;
-        cluster_size / 2 + 1
-    }
-
     /// Check if running in single-node mode
     ///
     /// Returns false if either static peers or DNS discovery is configured.

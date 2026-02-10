@@ -135,10 +135,6 @@ impl JSendError {
     pub fn internal(message: impl Into<String>) -> (StatusCode, Json<JSendError>) {
         Self::response(StatusCode::INTERNAL_SERVER_ERROR, message)
     }
-
-    pub fn bad_gateway(message: impl Into<String>) -> (StatusCode, Json<JSendError>) {
-        Self::response(StatusCode::BAD_GATEWAY, message)
-    }
 }
 
 // ============================================================================
@@ -183,18 +179,6 @@ impl ApiError {
 
     pub fn internal(message: impl Into<String>) -> Self {
         ApiError::Error(StatusCode::INTERNAL_SERVER_ERROR, message.into())
-    }
-
-    pub fn bad_gateway(message: impl Into<String>) -> Self {
-        ApiError::Error(StatusCode::BAD_GATEWAY, message.into())
-    }
-
-    pub fn from_status(status: StatusCode, message: impl Into<String>) -> Self {
-        if status.is_client_error() {
-            ApiError::Fail(status, message.into())
-        } else {
-            ApiError::Error(status, message.into())
-        }
     }
 }
 

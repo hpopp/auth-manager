@@ -621,26 +621,6 @@ impl Database {
         }
     }
 
-    /// Truncate old replication log entries
-    pub fn truncate_replication_log(&self, keep_from: u64) -> Result<u64, DatabaseError> {
-        let write_txn = self.begin_write()?;
-        let mut deleted = 0u64;
-        {
-            let mut table = write_txn.open_table(REPLICATION_LOG)?;
-            let keys_to_delete: Vec<u64> = table
-                .range(..keep_from)?
-                .map(|r| r.map(|(k, _)| k.value()))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            for key in keys_to_delete {
-                table.remove(key)?;
-                deleted += 1;
-            }
-        }
-        write_txn.commit()?;
-        Ok(deleted)
-    }
-
     // ========================================================================
     // Admin operations
     // ========================================================================
