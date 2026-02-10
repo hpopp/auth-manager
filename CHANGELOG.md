@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GET /sessions` to list all sessions. Optionally filter by `subject_id`.
 - E2E test suite with Hurl (+ CI job).
 
+### Changed
+
+- Dockerfile and release optimizations.
+
 ### Removed
 
 - API keys no longer have a string prefix.

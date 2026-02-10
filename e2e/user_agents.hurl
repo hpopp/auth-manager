@@ -12,7 +12,7 @@ HTTP 200
 jsonpath "$.status" == "success"
 jsonpath "$.data.browser" == "Chrome"
 jsonpath "$.data.kind" == "Desktop"
-jsonpath "$.data.os" == "Mac OS X"
+jsonpath "$.data.os" == "Mac OSX"
 
 
 # Parse Safari on iOS

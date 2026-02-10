@@ -35,5 +35,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1", features = ["v4"] }
 woothee = "0.13"
 
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
 [dev-dependencies]
 tempfile = "3"

@@ -6,12 +6,15 @@ WORKDIR /app
 # Install build dependencies for musl
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf
 
-# Copy source
+# Cache dependencies in a separate layer
 COPY Cargo.toml Cargo.lock ./
-COPY src ./src
+RUN mkdir src && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs \
+    && cargo build --release \
+    && rm -rf src
 
-# Build release binary
-RUN cargo build --release
+# Build actual source
+COPY src ./src
+RUN touch src/main.rs src/lib.rs && cargo build --release
 
 # Runtime stage
 FROM alpine:3.21
