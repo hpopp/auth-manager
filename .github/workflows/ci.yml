@@ -132,7 +132,7 @@ jobs:
       - name: Install Hurl
         uses: gacts/install-hurl@v1
       - name: Run E2E tests
-        run: hurl --test e2e/*.hurl --variable host=localhost --variable port=8080
+        run: hurl --test --retry 3 --retry-interval 1000 e2e/*.hurl --variable host=localhost --variable port=8080
       - name: Stop container
         if: always()
         run: docker stop auth-manager
