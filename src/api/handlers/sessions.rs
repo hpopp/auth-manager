@@ -181,23 +181,23 @@ pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
     AppQuery(params): AppQuery<ListParams>,
 ) -> Result<Json<JSendPaginated<SessionResponse>>, ApiError> {
-    params.pagination.validate()?;
+    params.validate()?;
 
     match session::list(&state.db, params.subject_id.as_deref()) {
         Ok(sessions) => {
             let total = sessions.len() as u64;
             let items: Vec<SessionResponse> = sessions
                 .iter()
-                .skip(params.pagination.offset as usize)
-                .take(params.pagination.limit as usize)
+                .skip(params.offset as usize)
+                .take(params.limit as usize)
                 .map(session_to_response)
                 .collect();
 
             Ok(JSendPaginated::success(
                 items,
                 Pagination {
-                    limit: params.pagination.limit,
-                    offset: params.pagination.offset,
+                    limit: params.limit,
+                    offset: params.offset,
                     total,
                 },
             ))

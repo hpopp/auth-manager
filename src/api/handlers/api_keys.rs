@@ -245,23 +245,23 @@ pub async fn list_api_keys(
     State(state): State<Arc<AppState>>,
     AppQuery(params): AppQuery<ListParams>,
 ) -> Result<Json<JSendPaginated<ApiKeyResponse>>, ApiError> {
-    params.pagination.validate()?;
+    params.validate()?;
 
     match api_key::list(&state.db, params.subject_id.as_deref()) {
         Ok(keys) => {
             let total = keys.len() as u64;
             let items: Vec<ApiKeyResponse> = keys
                 .iter()
-                .skip(params.pagination.offset as usize)
-                .take(params.pagination.limit as usize)
+                .skip(params.offset as usize)
+                .take(params.limit as usize)
                 .map(api_key_to_response)
                 .collect();
 
             Ok(JSendPaginated::success(
                 items,
                 Pagination {
-                    limit: params.pagination.limit,
-                    offset: params.pagination.offset,
+                    limit: params.limit,
+                    offset: params.offset,
                     total,
                 },
             ))
