@@ -1,5 +1,8 @@
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{FromRequest, FromRequestParts, Request};
 use axum::http::StatusCode;
 use axum::Json;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -193,4 +196,73 @@ impl ApiError {
             ApiError::Error(status, message.into())
         }
     }
+}
+
+// ============================================================================
+// Custom extractors (reject with JSend-formatted ApiError)
+// ============================================================================
+
+/// Drop-in replacement for `axum::Json` that rejects with JSend errors.
+pub struct AppJson<T>(pub T);
+
+#[axum::async_trait]
+impl<S, T> FromRequest<S> for AppJson<T>
+where
+    axum::Json<T>: FromRequest<S, Rejection = JsonRejection>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, ApiError> {
+        match axum::Json::<T>::from_request(req, state).await {
+            Ok(Json(value)) => Ok(AppJson(value)),
+            Err(rejection) => {
+                let message = match rejection {
+                    JsonRejection::JsonDataError(err) => {
+                        format!("Invalid request body: {}", err.body_text())
+                    }
+                    JsonRejection::JsonSyntaxError(_) => "Malformed JSON in request body".into(),
+                    JsonRejection::MissingJsonContentType(_) => {
+                        "Missing Content-Type: application/json header".into()
+                    }
+                    _ => "Failed to read request body".into(),
+                };
+                Err(ApiError::bad_request(message))
+            }
+        }
+    }
+}
+
+/// Drop-in replacement for `axum::extract::Query` that rejects with JSend errors.
+/// Uses `serde_qs` for deserialization, which includes field names in error messages.
+pub struct AppQuery<T>(pub T);
+
+#[axum::async_trait]
+impl<S, T> FromRequestParts<S> for AppQuery<T>
+where
+    T: DeserializeOwned + Send,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, ApiError> {
+        let query = parts.uri.query().unwrap_or_default();
+        serde_qs::from_str(query)
+            .map(AppQuery)
+            .map_err(|e| ApiError::bad_request(friendly_query_error(&e.to_string())))
+    }
+}
+
+/// Translate serde/serde_qs error messages into human-friendly descriptions.
+fn friendly_query_error(raw: &str) -> String {
+    let cleaned = raw
+        .replace("u32", "non-negative integer")
+        .replace("u64", "non-negative integer")
+        .replace("i32", "integer")
+        .replace("i64", "integer");
+
+    format!("Invalid query parameter: {}", cleaned)
 }
