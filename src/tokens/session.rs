@@ -107,13 +107,7 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, SessionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-
-    fn setup_db() -> (Database, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
-        let db = Database::open(temp_dir.path()).unwrap();
-        (db, temp_dir)
-    }
+    use crate::testutil::setup_db;
 
     #[test]
     fn test_create_and_validate_session() {

@@ -34,7 +34,7 @@ pub use admin::{admin_purge, cluster_status, health, parse_user_agent_handler};
 pub use api_keys::{
     create_api_key, get_api_key, list_api_keys, revoke_api_key, update_api_key, validate_api_key,
 };
-pub use internal::{internal_heartbeat, internal_replicate, internal_vote};
+pub use internal::{internal_heartbeat, internal_replicate, internal_sync, internal_vote};
 pub use sessions::{create_session, get_session, list_sessions, revoke_session, validate_session};
 
 /// Map a ReplicationError to an ApiError

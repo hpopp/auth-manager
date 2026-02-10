@@ -14,7 +14,11 @@ pub mod config;
 pub mod device;
 pub mod expiration;
 pub mod storage;
+#[cfg(test)]
+pub mod testutil;
 pub mod tokens;
+
+use std::sync::atomic::AtomicBool;
 
 use tokio::sync::RwLock;
 
@@ -27,4 +31,6 @@ pub struct AppState {
     pub config: Config,
     pub db: Database,
     pub http_client: reqwest::Client,
+    /// Guards against concurrent sync/catchup operations
+    pub sync_in_progress: AtomicBool,
 }

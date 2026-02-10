@@ -173,7 +173,7 @@ impl Config {
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
                         // Filter out self - peer address starts with node_id (e.g., "node-1:8080" starts with "node-1")
-                        .filter(|s| !s.starts_with(&format!("{}:", &node_id)) && s != &node_id)
+                        .filter(|s| !s.starts_with(&format!("{node_id}:")) && s != &node_id)
                         .collect()
                 })
                 .unwrap_or_default();

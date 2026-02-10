@@ -100,7 +100,7 @@ pub async fn admin_purge(
                 sessions_deleted: stats.sessions,
             }))
         }
-        Err(e) => Err(ApiError::internal(format!("Failed to purge data: {}", e))),
+        Err(e) => Err(ApiError::internal(format!("Failed to purge data: {e}"))),
     }
 }
 

@@ -78,7 +78,7 @@ async fn send_heartbeat(
     term: u64,
     sequence: u64,
 ) -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("http://{}/_internal/heartbeat", peer_addr);
+    let url = format!("http://{peer_addr}/_internal/heartbeat");
 
     let request = HeartbeatRequest {
         leader_address: Some(leader_address.to_string()),

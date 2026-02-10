@@ -69,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         db,
         http_client,
+        sync_in_progress: std::sync::atomic::AtomicBool::new(false),
     });
 
     // Run initial peer discovery before starting cluster tasks

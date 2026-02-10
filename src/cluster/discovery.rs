@@ -143,7 +143,7 @@ pub fn compute_advertise_address(bind_address: &str) -> String {
     let port = bind_address.rsplit(':').next().unwrap_or("8080");
 
     if let Some(ip) = detect_local_ip() {
-        format!("{}:{}", ip, port)
+        format!("{ip}:{port}")
     } else {
         bind_address.to_string()
     }

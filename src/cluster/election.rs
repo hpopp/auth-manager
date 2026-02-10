@@ -131,7 +131,7 @@ async fn send_vote_request(
     term: u64,
     sequence: u64,
 ) -> Result<(u64, bool), Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("http://{}/_internal/vote", peer_addr);
+    let url = format!("http://{peer_addr}/_internal/vote");
 
     let request = VoteRequest {
         candidate_id: node_id.to_string(),

@@ -264,5 +264,5 @@ fn friendly_query_error(raw: &str) -> String {
         .replace("i32", "integer")
         .replace("i64", "integer");
 
-    format!("Invalid query parameter: {}", cleaned)
+    format!("Invalid query parameter: {cleaned}")
 }

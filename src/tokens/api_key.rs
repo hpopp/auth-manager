@@ -114,13 +114,7 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, ApiKeyError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-
-    fn setup_db() -> (Database, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
-        let db = Database::open(temp_dir.path()).unwrap();
-        (db, temp_dir)
-    }
+    use crate::testutil::setup_db;
 
     #[test]
     fn test_create_and_validate_api_key() {
@@ -197,7 +191,7 @@ mod tests {
 
         // Create 5 API keys
         for i in 0..5 {
-            create(&db, &format!("Key {}", i), "user-123", None, None, vec![]).unwrap();
+            create(&db, &format!("Key {i}"), "user-123", None, None, vec![]).unwrap();
         }
 
         let all = list_by_subject(&db, "user-123").unwrap();
