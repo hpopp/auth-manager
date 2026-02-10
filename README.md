@@ -1,5 +1,5 @@
 [![CI](https://github.com/hpopp/auth-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/hpopp/auth-manager/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.3.0-orange.svg)](https://github.com/hpopp/auth-manager/commits/main)
+[![Version](https://img.shields.io/badge/version-0.4.0-orange.svg)](https://github.com/hpopp/auth-manager/commits/main)
 [![Last Updated](https://img.shields.io/github/last-commit/hpopp/auth-manager.svg)](https://github.com/hpopp/auth-manager/commits/main)
 
 # Auth Manager

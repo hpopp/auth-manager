@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-10
+
+### Added
+
+- Sessions now support generic `metadata`.
+- Optionally create an API key with a client-provided value. Useful for migrations.
+- `GET /api-keys` to list all API keys. Optionally filter by `subject_id`.
+- `GET /sessions` to list all sessions. Optionally filter by `subject_id`.
+- E2E test suite with Hurl (+ CI job).
+
+### Changed
+
+- Dockerfile and release optimizations.
+
+### Removed
+
+- API keys no longer have a string prefix.
+- `GET /api-keys/subject/:subject_id` replaced by generic list route.
+- `GET /sessions/subject/:subject_id` replaced by generic list route.
+
+[#6](https://github.com/hpopp/auth-manager/pull/6)
+
 ## [0.3.0] - 2026-02-10
 
 ### Added

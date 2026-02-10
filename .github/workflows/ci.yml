@@ -108,6 +108,34 @@ jobs:
         with:
           name: image
           path: /tmp/image.tar
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: image_build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image
+      - name: Load and start container
+        run: |
+          docker load --input image.tar
+          IMAGE=$(docker images --quiet | head -1)
+          docker run -d --name auth-manager \
+            -p 8080:8080 \
+            -e TEST_MODE=true \
+            -e BIND_ADDRESS=0.0.0.0:8080 \
+            "$IMAGE"
+          until curl -sf http://localhost:8080/_internal/health; do sleep 1; done
+      - name: Install Hurl
+        uses: gacts/install-hurl@v1
+      - name: Run E2E tests
+        run: hurl --test --retry 3 --retry-interval 1000 e2e/*.hurl --variable host=localhost --variable port=8080
+      - name: Stop container
+        if: always()
+        run: docker stop auth-manager
   trivy:
     name: Trivy Scan
     runs-on: ubuntu-latest

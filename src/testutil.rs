@@ -64,6 +64,7 @@ pub fn make_session(id: &str, subject: &str) -> SessionToken {
         id: id.to_string(),
         ip_address: None,
         last_used_at: None,
+        metadata: None,
         subject_id: subject.to_string(),
         token: format!("tok_{id}"),
     }

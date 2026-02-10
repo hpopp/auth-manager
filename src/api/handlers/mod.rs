@@ -8,16 +8,17 @@ use serde::Deserialize;
 use crate::api::response::ApiError;
 use crate::cluster::ReplicationError;
 
-/// Shared pagination query parameters for list endpoints
+/// Query parameters for list endpoints
 #[derive(Debug, Deserialize)]
-pub struct PaginationParams {
+pub struct ListParams {
     #[serde(default = "default_limit")]
     pub limit: u32,
     #[serde(default)]
     pub offset: u32,
+    pub subject_id: Option<String>,
 }
 
-impl PaginationParams {
+impl ListParams {
     pub fn validate(&self) -> Result<(), ApiError> {
         if self.limit == 0 {
             return Err(ApiError::bad_request("limit must be greater than 0"));

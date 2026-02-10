@@ -2,14 +2,15 @@ use axum::extract::{Path, State};
 use axum::Json;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{replication_error, PaginationParams};
+use super::{replication_error, ListParams};
 use crate::api::response::{ApiError, AppJson, AppQuery, JSend, JSendPaginated, Pagination};
 use crate::cluster::replicate_write;
 use crate::device::parse_user_agent;
 use crate::storage::models::{SessionToken, WriteOp};
-use crate::tokens::{generator::generate_token, session};
+use crate::tokens::{generator::generate_hex, session};
 use crate::AppState;
 
 // ============================================================================
@@ -20,6 +21,8 @@ use crate::AppState;
 pub struct CreateSessionRequest {
     #[serde(default)]
     pub ip_address: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
     pub subject_id: String,
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
@@ -42,6 +45,8 @@ pub struct SessionResponse {
     pub id: String,
     pub ip_address: Option<String>,
     pub last_used_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
     pub subject_id: String,
 }
 
@@ -87,8 +92,9 @@ pub async fn create_session(
         id: uuid::Uuid::new_v4().to_string(),
         ip_address: req.ip_address.clone(),
         last_used_at: None,
+        metadata: req.metadata.clone(),
         subject_id: req.subject_id.clone(),
-        token: generate_token(),
+        token: generate_hex(32),
     };
 
     let operation = WriteOp::CreateSession(session.clone());
@@ -173,12 +179,11 @@ pub async fn revoke_session(
 
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
-    Path(subject_id): Path<String>,
-    AppQuery(params): AppQuery<PaginationParams>,
+    AppQuery(params): AppQuery<ListParams>,
 ) -> Result<Json<JSendPaginated<SessionResponse>>, ApiError> {
     params.validate()?;
 
-    match session::list_by_subject(&state.db, &subject_id) {
+    match session::list(&state.db, params.subject_id.as_deref()) {
         Ok(sessions) => {
             let total = sessions.len() as u64;
             let items: Vec<SessionResponse> = sessions
@@ -231,6 +236,7 @@ fn session_to_response(session: &SessionToken) -> SessionResponse {
         id: session.id.clone(),
         ip_address: session.ip_address.clone(),
         last_used_at: session.last_used_at.map(|t| t.to_rfc3339()),
+        metadata: session.metadata.clone(),
         subject_id: session.subject_id.clone(),
     }
 }

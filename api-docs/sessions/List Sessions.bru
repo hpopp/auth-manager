@@ -1,39 +1,31 @@
 meta {
-  name: List Sessions by Subject
+  name: List Sessions
   type: http
-  seq: 4
+  seq: 3
 }
 
 get {
-  url: {{scheme}}://{{host}}:{{port}}/sessions/subject/{{subjectId}}
+  url: {{scheme}}://{{host}}:{{port}}/sessions
   body: none
   auth: none
 }
 
 params:query {
+  ~subject_id: user-123
   ~limit: 20
   ~offset: 0
 }
 
-vars:pre-request {
-  subjectId: user-123
-}
-
 docs {
-  # List Sessions by Subject
+  # List Sessions
   
-  Lists all active sessions for a given subject ID.
-  
-  ## Path Parameters
-  
-  | Parameter | Description |
-  |-----------|-------------|
-  | subject_id | The subject identifier to list sessions for |
+  Lists all active sessions, optionally filtered by subject ID.
   
   ## Query Parameters
   
   | Parameter | Description | Default |
   |-----------|-------------|---------|
+  | subject_id | Optional subject identifier to filter sessions | (all) |
   | limit | Maximum number of items to return | 20 |
   | offset | Number of items to skip | 0 |
   

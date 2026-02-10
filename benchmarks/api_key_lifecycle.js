@@ -63,6 +63,16 @@ export default function (data) {
     "validate: correct id": (r) => r.json().data.id === id,
   });
 
+  // List API keys for this subject
+  const listRes = http.get(
+    `${leader}/api-keys?subject_id=bench-user-${__VU}`,
+  );
+
+  check(listRes, {
+    "list: status 200": (r) => r.status === 200,
+    "list: has items": (r) => r.json().data.items.length > 0,
+  });
+
   // Update the API key
   const updateRes = http.put(
     `${leader}/api-keys/${id}`,
