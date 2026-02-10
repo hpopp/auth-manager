@@ -62,6 +62,16 @@ export default function (data) {
     "validate: correct id": (r) => r.json().data.id === id,
   });
 
+  // List sessions for this subject
+  const listRes = http.get(
+    `${leader}/sessions?subject_id=bench-user-${__VU}`,
+  );
+
+  check(listRes, {
+    "list: status 200": (r) => r.status === 200,
+    "list: has items": (r) => r.json().data.items.length > 0,
+  });
+
   // Revoke the session
   const revokeRes = http.del(`${leader}/sessions/${id}`);
 
