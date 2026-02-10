@@ -3,8 +3,32 @@ mod api_keys;
 mod internal;
 mod sessions;
 
+use serde::Deserialize;
+
 use crate::api::response::ApiError;
 use crate::cluster::ReplicationError;
+
+/// Shared pagination query parameters for list endpoints
+#[derive(Debug, Deserialize)]
+pub struct PaginationParams {
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+impl PaginationParams {
+    pub fn validate(&self) -> Result<(), ApiError> {
+        if self.limit == 0 {
+            return Err(ApiError::bad_request("limit must be greater than 0"));
+        }
+        Ok(())
+    }
+}
+
+fn default_limit() -> u32 {
+    20
+}
 
 pub use admin::{admin_purge, cluster_status, health, parse_user_agent_handler};
 pub use api_keys::{

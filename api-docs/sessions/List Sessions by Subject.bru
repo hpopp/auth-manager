@@ -10,6 +10,11 @@ get {
   auth: none
 }
 
+params:query {
+  ~limit: 20
+  ~offset: 0
+}
+
 vars:pre-request {
   subjectId: user-123
 }
@@ -25,28 +30,42 @@ docs {
   |-----------|-------------|
   | subject_id | The subject identifier to list sessions for |
   
+  ## Query Parameters
+  
+  | Parameter | Description | Default |
+  |-----------|-------------|---------|
+  | limit | Maximum number of items to return | 20 |
+  | offset | Number of items to skip | 0 |
+  
   ## Response
   
   ```json
   {
     "status": "success",
-    "data": [
-      {
-        "created_at": "2026-02-08T10:00:00Z",
-        "device_info": {
-          "browser": "Chrome",
-          "browser_version": "120.0.0.0",
-          "kind": "Desktop",
-          "os": "Mac OS X",
-          "os_version": "10.15"
-        },
-        "expires_at": "2026-02-08T11:00:00Z",
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "ip_address": "192.168.1.42",
-        "last_used_at": "2026-02-08T10:30:00Z",
-        "subject_id": "user-123"
+    "data": {
+      "items": [
+        {
+          "created_at": "2026-02-08T10:00:00Z",
+          "device_info": {
+            "browser": "Chrome",
+            "browser_version": "120.0.0.0",
+            "kind": "Desktop",
+            "os": "Mac OS X",
+            "os_version": "10.15"
+          },
+          "expires_at": "2026-02-08T11:00:00Z",
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "ip_address": "192.168.1.42",
+          "last_used_at": "2026-02-08T10:30:00Z",
+          "subject_id": "user-123"
+        }
+      ],
+      "pagination": {
+        "limit": 20,
+        "offset": 0,
+        "total": 1
       }
-    ]
+    }
   }
   ```
 }

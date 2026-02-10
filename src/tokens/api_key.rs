@@ -190,4 +190,33 @@ mod tests {
         let result = validate(&db, "am_invalid_key_that_does_not_exist").unwrap();
         assert!(result.is_none());
     }
+
+    #[test]
+    fn test_list_by_subject_pagination() {
+        let (db, _temp) = setup_db();
+
+        // Create 5 API keys
+        for i in 0..5 {
+            create(&db, &format!("Key {}", i), "user-123", None, None, vec![]).unwrap();
+        }
+
+        let all = list_by_subject(&db, "user-123").unwrap();
+        assert_eq!(all.len(), 5);
+
+        // Simulate pagination: limit=2, offset=0
+        let page: Vec<_> = all.iter().skip(0).take(2).collect();
+        assert_eq!(page.len(), 2);
+
+        // limit=2, offset=2
+        let page: Vec<_> = all.iter().skip(2).take(2).collect();
+        assert_eq!(page.len(), 2);
+
+        // limit=2, offset=4 (last page, partial)
+        let page: Vec<_> = all.iter().skip(4).take(2).collect();
+        assert_eq!(page.len(), 1);
+
+        // offset beyond total
+        let page: Vec<_> = all.iter().skip(10).take(2).collect();
+        assert_eq!(page.len(), 0);
+    }
 }

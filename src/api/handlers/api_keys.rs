@@ -1,13 +1,11 @@
-use axum::{
-    extract::{Path, State},
-    Json,
-};
+use axum::extract::{Path, State};
+use axum::Json;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::replication_error;
-use crate::api::response::{ApiError, JSend};
+use super::{replication_error, PaginationParams};
+use crate::api::response::{ApiError, AppJson, AppQuery, JSend, JSendPaginated, Pagination};
 use crate::cluster::replicate_write;
 use crate::storage::models::{ApiKey as ApiKeyModel, WriteOp};
 use crate::tokens::{
@@ -77,7 +75,7 @@ pub struct VerifyApiKeyRequest {
 
 pub async fn create_api_key(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateApiKeyRequest>,
+    AppJson(req): AppJson<CreateApiKeyRequest>,
 ) -> Result<Json<JSend<CreateApiKeyResponse>>, ApiError> {
     validate_create_api_key(&req)?;
 
@@ -134,7 +132,7 @@ pub async fn create_api_key(
 pub async fn update_api_key(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(req): Json<UpdateApiKeyRequest>,
+    AppJson(req): AppJson<UpdateApiKeyRequest>,
 ) -> Result<Json<JSend<ApiKeyResponse>>, ApiError> {
     validate_update_api_key(&req)?;
 
@@ -196,7 +194,7 @@ pub async fn get_api_key(
 
 pub async fn validate_api_key(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<VerifyApiKeyRequest>,
+    AppJson(req): AppJson<VerifyApiKeyRequest>,
 ) -> Result<Json<JSend<ApiKeyResponse>>, ApiError> {
     if req.key.trim().is_empty() {
         return Err(ApiError::bad_request("key is required"));
@@ -240,11 +238,29 @@ pub async fn revoke_api_key(
 pub async fn list_api_keys(
     State(state): State<Arc<AppState>>,
     Path(subject_id): Path<String>,
-) -> Result<Json<JSend<Vec<ApiKeyResponse>>>, ApiError> {
+    AppQuery(params): AppQuery<PaginationParams>,
+) -> Result<Json<JSendPaginated<ApiKeyResponse>>, ApiError> {
+    params.validate()?;
+
     match api_key::list_by_subject(&state.db, &subject_id) {
-        Ok(keys) => Ok(JSend::success(
-            keys.iter().map(api_key_to_response).collect(),
-        )),
+        Ok(keys) => {
+            let total = keys.len() as u64;
+            let items: Vec<ApiKeyResponse> = keys
+                .iter()
+                .skip(params.offset as usize)
+                .take(params.limit as usize)
+                .map(api_key_to_response)
+                .collect();
+
+            Ok(JSendPaginated::success(
+                items,
+                Pagination {
+                    limit: params.limit,
+                    offset: params.offset,
+                    total,
+                },
+            ))
+        }
         Err(e) => Err(ApiError::internal(e.to_string())),
     }
 }

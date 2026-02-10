@@ -1,13 +1,11 @@
-use axum::{
-    extract::{Path, State},
-    Json,
-};
+use axum::extract::{Path, State};
+use axum::Json;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use super::replication_error;
-use crate::api::response::{ApiError, JSend};
+use super::{replication_error, PaginationParams};
+use crate::api::response::{ApiError, AppJson, AppQuery, JSend, JSendPaginated, Pagination};
 use crate::cluster::replicate_write;
 use crate::device::parse_user_agent;
 use crate::storage::models::{SessionToken, WriteOp};
@@ -67,7 +65,7 @@ pub struct DeviceInfoResponse {
 
 pub async fn create_session(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateSessionRequest>,
+    AppJson(req): AppJson<CreateSessionRequest>,
 ) -> Result<Json<JSend<CreateSessionResponse>>, ApiError> {
     validate_create_session(&req)?;
 
@@ -132,7 +130,7 @@ pub async fn get_session(
 
 pub async fn validate_session(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<VerifySessionRequest>,
+    AppJson(req): AppJson<VerifySessionRequest>,
 ) -> Result<Json<JSend<SessionResponse>>, ApiError> {
     if req.token.trim().is_empty() {
         return Err(ApiError::bad_request("token is required"));
@@ -176,11 +174,29 @@ pub async fn revoke_session(
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Path(subject_id): Path<String>,
-) -> Result<Json<JSend<Vec<SessionResponse>>>, ApiError> {
+    AppQuery(params): AppQuery<PaginationParams>,
+) -> Result<Json<JSendPaginated<SessionResponse>>, ApiError> {
+    params.validate()?;
+
     match session::list_by_subject(&state.db, &subject_id) {
-        Ok(sessions) => Ok(JSend::success(
-            sessions.iter().map(session_to_response).collect(),
-        )),
+        Ok(sessions) => {
+            let total = sessions.len() as u64;
+            let items: Vec<SessionResponse> = sessions
+                .iter()
+                .skip(params.offset as usize)
+                .take(params.limit as usize)
+                .map(session_to_response)
+                .collect();
+
+            Ok(JSendPaginated::success(
+                items,
+                Pagination {
+                    limit: params.limit,
+                    offset: params.offset,
+                    total,
+                },
+            ))
+        }
         Err(e) => Err(ApiError::internal(e.to_string())),
     }
 }

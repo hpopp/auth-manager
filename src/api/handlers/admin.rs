@@ -2,7 +2,7 @@ use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::api::response::{ApiError, JSend};
+use crate::api::response::{ApiError, AppJson, JSend};
 use crate::device::parse_user_agent;
 use crate::AppState;
 
@@ -105,7 +105,7 @@ pub async fn admin_purge(
 }
 
 pub async fn parse_user_agent_handler(
-    Json(req): Json<ParseUserAgentRequest>,
+    AppJson(req): AppJson<ParseUserAgentRequest>,
 ) -> Result<Json<JSend<DeviceInfoResponse>>, ApiError> {
     if req.user_agent.trim().is_empty() {
         return Err(ApiError::bad_request("user_agent is required"));
