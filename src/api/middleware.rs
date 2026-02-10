@@ -57,7 +57,8 @@ async fn proxy_to_leader(
 ) -> Response<Body> {
     let (parts, body) = request.into_parts();
 
-    let url = format!("http://{}{}", leader_addr, parts.uri.path());
+    let path = parts.uri.path();
+    let url = format!("http://{leader_addr}{path}");
 
     let client = &state.http_client;
     let mut builder = match parts.method {
@@ -79,7 +80,7 @@ async fn proxy_to_leader(
         Err(e) => {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                format!("Failed to read request body: {}", e),
+                format!("Failed to read request body: {e}"),
             );
         }
     };
@@ -94,7 +95,7 @@ async fn proxy_to_leader(
         Err(e) => {
             return error_response(
                 StatusCode::BAD_GATEWAY,
-                format!("Failed to forward request to leader: {}", e),
+                format!("Failed to forward request to leader: {e}"),
             );
         }
     };
@@ -119,7 +120,7 @@ async fn proxy_to_leader(
         }),
         Err(e) => error_response(
             StatusCode::BAD_GATEWAY,
-            format!("Failed to read leader response: {}", e),
+            format!("Failed to read leader response: {e}"),
         ),
     }
 }

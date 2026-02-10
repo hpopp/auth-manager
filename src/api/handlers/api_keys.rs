@@ -114,7 +114,7 @@ pub async fn create_api_key(
     state
         .db
         .put_api_key(&api_key_record)
-        .map_err(|e| ApiError::internal(format!("Failed to store API key: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to store API key: {e}")))?;
 
     tracing::debug!(key_id = %api_key_record.id, name = %req.name, "Created API key");
 
@@ -160,7 +160,7 @@ pub async fn update_api_key(
             req.description.as_ref().map(|d| d.as_deref()),
             req.scopes.as_deref(),
         )
-        .map_err(|e| ApiError::internal(format!("Failed to update API key: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to update API key: {e}")))?;
 
     let api_key_record = state
         .db
@@ -229,7 +229,7 @@ pub async fn revoke_api_key(
     state
         .db
         .delete_api_key(&key_hash)
-        .map_err(|e| ApiError::internal(format!("Failed to delete API key: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to delete API key: {e}")))?;
 
     tracing::debug!(id = %id, "Revoked API key");
     Ok(JSend::success(()))

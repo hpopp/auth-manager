@@ -39,12 +39,15 @@ export default function (data) {
     jsonHeaders,
   );
 
-  check(createRes, {
+  const createOk = check(createRes, {
     "create: status 200": (r) => r.status === 200,
     "create: has key": (r) => r.json().data.key !== undefined,
   });
 
-  if (createRes.status !== 200) return;
+  if (!createOk) {
+    sleep(0.1);
+    return;
+  }
 
   const { id, key } = createRes.json().data;
 

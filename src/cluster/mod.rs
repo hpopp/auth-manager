@@ -1,4 +1,4 @@
-mod catchup;
+pub(crate) mod catchup;
 pub mod discovery;
 mod election;
 mod heartbeat;

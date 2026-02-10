@@ -99,7 +99,7 @@ pub async fn create_session(
     state
         .db
         .put_session(&session)
-        .map_err(|e| ApiError::internal(format!("Failed to store session: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to store session: {e}")))?;
 
     tracing::debug!(id = %session.id, subject_id = %req.subject_id, "Created session token");
 
@@ -165,7 +165,7 @@ pub async fn revoke_session(
     state
         .db
         .delete_session(&token)
-        .map_err(|e| ApiError::internal(format!("Failed to delete session: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to delete session: {e}")))?;
 
     tracing::debug!(id = %id, "Revoked session token");
     Ok(JSend::success(()))

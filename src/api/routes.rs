@@ -57,6 +57,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/_internal/health", get(handlers::health))
         .route("/_internal/heartbeat", post(handlers::internal_heartbeat))
         .route("/_internal/replicate", post(handlers::internal_replicate))
+        .route("/_internal/sync", post(handlers::internal_sync))
         .route("/_internal/vote", post(handlers::internal_vote));
 
     Router::new()

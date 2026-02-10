@@ -1,10 +1,8 @@
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use thiserror::Error;
 
-use crate::storage::models::{DeviceInfo, SessionToken};
+use crate::storage::models::SessionToken;
 use crate::storage::Database;
-
-use super::generator::generate_token;
 
 #[derive(Debug, Error)]
 pub enum SessionError {
@@ -14,31 +12,6 @@ pub enum SessionError {
     Expired,
     #[error("Session not found")]
     NotFound,
-}
-
-/// Create a new session token
-pub fn create(
-    db: &Database,
-    subject_id: &str,
-    device_info: DeviceInfo,
-    ttl_seconds: u64,
-) -> Result<SessionToken, SessionError> {
-    let now = Utc::now();
-    let session = SessionToken {
-        created_at: now,
-        device_info,
-        expires_at: now + Duration::seconds(ttl_seconds as i64),
-        id: uuid::Uuid::new_v4().to_string(),
-        ip_address: None,
-        last_used_at: None,
-        subject_id: subject_id.to_string(),
-        token: generate_token(),
-    };
-
-    db.put_session(&session)?;
-    tracing::debug!(id = %session.id, subject_id = %subject_id, "Created session token");
-
-    Ok(session)
 }
 
 /// Validate a session token, returning it if valid
@@ -62,15 +35,6 @@ pub fn validate(db: &Database, token: &str) -> Result<Option<SessionToken>, Sess
         }
         None => Ok(None),
     }
-}
-
-/// Revoke (delete) a session token by its secret token value
-pub fn revoke(db: &Database, token: &str) -> Result<bool, SessionError> {
-    let deleted = db.delete_session(token)?;
-    if deleted {
-        tracing::debug!(token = %token, "Revoked session token");
-    }
-    Ok(deleted)
 }
 
 /// List all sessions for a resource
@@ -107,23 +71,14 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, SessionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-
-    fn setup_db() -> (Database, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
-        let db = Database::open(temp_dir.path()).unwrap();
-        (db, temp_dir)
-    }
+    use crate::testutil::{make_session, setup_db};
 
     #[test]
-    fn test_create_and_validate_session() {
+    fn test_store_and_validate_session() {
         let (db, _temp) = setup_db();
 
-        let session = create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
-        assert!(!session.id.is_empty());
-        assert!(!session.token.is_empty());
-        assert_ne!(session.id, session.token);
-        assert_eq!(session.subject_id, "user123");
+        let session = make_session("s1", "user123");
+        db.put_session(&session).unwrap();
 
         let validated = validate(&db, &session.token).unwrap();
         assert!(validated.is_some());
@@ -134,9 +89,10 @@ mod tests {
     fn test_revoke_session() {
         let (db, _temp) = setup_db();
 
-        let session = create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
+        let session = make_session("s1", "user123");
+        db.put_session(&session).unwrap();
 
-        assert!(revoke(&db, &session.token).unwrap());
+        assert!(db.delete_session(&session.token).unwrap());
         assert!(validate(&db, &session.token).unwrap().is_none());
     }
 
@@ -144,43 +100,29 @@ mod tests {
     fn test_list_by_subject() {
         let (db, _temp) = setup_db();
 
-        create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
-        create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
-        create(&db, "user456", DeviceInfo::default(), 3600).unwrap();
+        for (id, subject) in [("s1", "user123"), ("s2", "user123"), ("s3", "user456")] {
+            db.put_session(&make_session(id, subject)).unwrap();
+        }
 
-        let sessions = list_by_subject(&db, "user123").unwrap();
-        assert_eq!(sessions.len(), 2);
-
-        let sessions = list_by_subject(&db, "user456").unwrap();
-        assert_eq!(sessions.len(), 1);
+        assert_eq!(list_by_subject(&db, "user123").unwrap().len(), 2);
+        assert_eq!(list_by_subject(&db, "user456").unwrap().len(), 1);
     }
 
     #[test]
     fn test_list_by_subject_pagination() {
         let (db, _temp) = setup_db();
 
-        // Create 5 sessions
-        for _ in 0..5 {
-            create(&db, "user123", DeviceInfo::default(), 3600).unwrap();
+        for i in 0..5 {
+            db.put_session(&make_session(&format!("s{i}"), "user123"))
+                .unwrap();
         }
 
         let all = list_by_subject(&db, "user123").unwrap();
         assert_eq!(all.len(), 5);
 
-        // Simulate pagination: limit=2, offset=0
-        let page: Vec<_> = all.iter().skip(0).take(2).collect();
-        assert_eq!(page.len(), 2);
-
-        // limit=2, offset=2
-        let page: Vec<_> = all.iter().skip(2).take(2).collect();
-        assert_eq!(page.len(), 2);
-
-        // limit=2, offset=4 (last page, partial)
-        let page: Vec<_> = all.iter().skip(4).take(2).collect();
-        assert_eq!(page.len(), 1);
-
-        // offset beyond total
-        let page: Vec<_> = all.iter().skip(10).take(2).collect();
-        assert_eq!(page.len(), 0);
+        assert_eq!(all.iter().skip(0).take(2).count(), 2);
+        assert_eq!(all.iter().skip(2).take(2).count(), 2);
+        assert_eq!(all.iter().skip(4).take(2).count(), 1);
+        assert_eq!(all.iter().skip(10).take(2).count(), 0);
     }
 }

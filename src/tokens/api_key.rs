@@ -1,10 +1,10 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use thiserror::Error;
 
 use crate::storage::models::ApiKey;
 use crate::storage::Database;
 
-use super::generator::{generate_api_key, hash_key};
+use super::generator::hash_key;
 
 #[derive(Debug, Error)]
 pub enum ApiKeyError {
@@ -14,39 +14,6 @@ pub enum ApiKeyError {
     Expired,
     #[error("API key not found")]
     NotFound,
-}
-
-/// Create a new API key
-/// Returns the plaintext key (only shown once) and the stored record
-pub fn create(
-    db: &Database,
-    name: &str,
-    subject_id: &str,
-    description: Option<String>,
-    expires_at: Option<DateTime<Utc>>,
-    scopes: Vec<String>,
-) -> Result<(String, ApiKey), ApiKeyError> {
-    let key = generate_api_key();
-    let key_hash = hash_key(&key);
-    let now = Utc::now();
-
-    let api_key = ApiKey {
-        created_at: now,
-        description,
-        expires_at,
-        id: uuid::Uuid::new_v4().to_string(),
-        key_hash: key_hash.clone(),
-        last_used_at: None,
-        name: name.to_string(),
-        subject_id: subject_id.to_string(),
-        scopes,
-        updated_at: Some(now),
-    };
-
-    db.put_api_key(&api_key)?;
-    tracing::debug!(key_id = %api_key.id, subject_id = %subject_id, name = %name, "Created API key");
-
-    Ok((key, api_key))
 }
 
 /// Validate an API key, returning the record if valid
@@ -71,16 +38,6 @@ pub fn validate(db: &Database, key: &str) -> Result<Option<ApiKey>, ApiKeyError>
         }
         None => Ok(None),
     }
-}
-
-/// Revoke (delete) an API key
-pub fn revoke(db: &Database, key: &str) -> Result<bool, ApiKeyError> {
-    let key_hash = hash_key(key);
-    let deleted = db.delete_api_key(&key_hash)?;
-    if deleted {
-        tracing::debug!(key_hash = %key_hash, "Revoked API key");
-    }
-    Ok(deleted)
 }
 
 /// List all API keys for a resource
@@ -114,73 +71,42 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, ApiKeyError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-
-    fn setup_db() -> (Database, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
-        let db = Database::open(temp_dir.path()).unwrap();
-        (db, temp_dir)
-    }
+    use crate::testutil::{make_api_key, setup_db};
 
     #[test]
-    fn test_create_and_validate_api_key() {
+    fn test_store_and_validate_api_key() {
         let (db, _temp) = setup_db();
 
-        let (key, api_key) = create(&db, "Test Key", "user-123", None, None, vec![]).unwrap();
-        assert!(key.starts_with("am_"));
-        assert_eq!(api_key.name, "Test Key");
-        assert_eq!(api_key.subject_id, "user-123");
-        assert!(api_key.expires_at.is_none());
-        assert!(api_key.scopes.is_empty());
+        let api_key = make_api_key("k1", "user-123");
+        db.put_api_key(&api_key).unwrap();
 
-        let validated = validate(&db, &key).unwrap();
-        assert!(validated.is_some());
-        assert_eq!(validated.unwrap().id, api_key.id);
-    }
-
-    #[test]
-    fn test_create_api_key_with_expiration() {
-        let (db, _temp) = setup_db();
-
-        let expires_at = Utc::now() + chrono::Duration::days(30);
-        let (_, api_key) = create(
-            &db,
-            "Expiring Key",
-            "user-456",
-            None,
-            Some(expires_at),
-            vec![],
-        )
-        .unwrap();
-        assert!(api_key.expires_at.is_some());
+        let fetched = db.get_api_key(&api_key.key_hash).unwrap();
+        assert!(fetched.is_some());
+        assert_eq!(fetched.unwrap().id, api_key.id);
     }
 
     #[test]
     fn test_revoke_api_key() {
         let (db, _temp) = setup_db();
 
-        let (key, _) = create(&db, "Test Key", "user-789", None, None, vec![]).unwrap();
+        let api_key = make_api_key("k1", "user-789");
+        db.put_api_key(&api_key).unwrap();
 
-        assert!(revoke(&db, &key).unwrap());
-        assert!(validate(&db, &key).unwrap().is_none());
+        assert!(db.delete_api_key(&api_key.key_hash).unwrap());
+        assert!(db.get_api_key(&api_key.key_hash).unwrap().is_none());
     }
 
     #[test]
     fn test_list_by_subject() {
         let (db, _temp) = setup_db();
 
-        create(&db, "Key 1", "user-123", None, None, vec![]).unwrap();
-        create(&db, "Key 2", "user-123", None, None, vec![]).unwrap();
-        create(&db, "Key 3", "user-456", None, None, vec![]).unwrap();
+        for (id, subject) in [("k1", "user-123"), ("k2", "user-123"), ("k3", "user-456")] {
+            db.put_api_key(&make_api_key(id, subject)).unwrap();
+        }
 
-        let keys = list_by_subject(&db, "user-123").unwrap();
-        assert_eq!(keys.len(), 2);
-
-        let keys = list_by_subject(&db, "user-456").unwrap();
-        assert_eq!(keys.len(), 1);
-
-        let keys = list_by_subject(&db, "user-999").unwrap();
-        assert_eq!(keys.len(), 0);
+        assert_eq!(list_by_subject(&db, "user-123").unwrap().len(), 2);
+        assert_eq!(list_by_subject(&db, "user-456").unwrap().len(), 1);
+        assert_eq!(list_by_subject(&db, "user-999").unwrap().len(), 0);
     }
 
     #[test]
@@ -195,28 +121,17 @@ mod tests {
     fn test_list_by_subject_pagination() {
         let (db, _temp) = setup_db();
 
-        // Create 5 API keys
         for i in 0..5 {
-            create(&db, &format!("Key {}", i), "user-123", None, None, vec![]).unwrap();
+            db.put_api_key(&make_api_key(&format!("k{i}"), "user-123"))
+                .unwrap();
         }
 
         let all = list_by_subject(&db, "user-123").unwrap();
         assert_eq!(all.len(), 5);
 
-        // Simulate pagination: limit=2, offset=0
-        let page: Vec<_> = all.iter().skip(0).take(2).collect();
-        assert_eq!(page.len(), 2);
-
-        // limit=2, offset=2
-        let page: Vec<_> = all.iter().skip(2).take(2).collect();
-        assert_eq!(page.len(), 2);
-
-        // limit=2, offset=4 (last page, partial)
-        let page: Vec<_> = all.iter().skip(4).take(2).collect();
-        assert_eq!(page.len(), 1);
-
-        // offset beyond total
-        let page: Vec<_> = all.iter().skip(10).take(2).collect();
-        assert_eq!(page.len(), 0);
+        assert_eq!(all.iter().skip(0).take(2).count(), 2);
+        assert_eq!(all.iter().skip(2).take(2).count(), 2);
+        assert_eq!(all.iter().skip(4).take(2).count(), 1);
+        assert_eq!(all.iter().skip(10).take(2).count(), 0);
     }
 }

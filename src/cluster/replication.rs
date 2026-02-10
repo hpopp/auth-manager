@@ -138,7 +138,7 @@ async fn send_replicate(
     sequence: u64,
     operation: WriteOp,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("http://{}/_internal/replicate", peer_addr);
+    let url = format!("http://{peer_addr}/_internal/replicate");
 
     let request = ReplicateRequest {
         leader_id: leader_id.to_string(),

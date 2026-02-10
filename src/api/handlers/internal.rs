@@ -3,9 +3,10 @@ use chrono::Utc;
 use std::sync::Arc;
 
 use crate::api::response::ApiError;
+use crate::cluster::catchup;
 use crate::cluster::rpc::{
-    HeartbeatRequest, HeartbeatResponse, ReplicateRequest, ReplicateResponse, VoteRequest,
-    VoteResponse,
+    HeartbeatRequest, HeartbeatResponse, ReplicateRequest, ReplicateResponse, SyncRequest,
+    SyncResponse, VoteRequest, VoteResponse,
 };
 use crate::cluster::Role;
 use crate::storage::models::{ReplicatedWrite, WriteOp};
@@ -46,8 +47,7 @@ pub async fn internal_replicate(
             if let Err(e) = state.db.append_replication_log(&write) {
                 tracing::error!(error = %e, "Failed to append to replication log");
                 return Err(ApiError::internal(format!(
-                    "Failed to append to replication log: {}",
-                    e
+                    "Failed to append to replication log: {e}"
                 )));
             }
 
@@ -63,7 +63,7 @@ pub async fn internal_replicate(
         }
         Err(e) => {
             tracing::error!(error = %e, "Failed to apply replicated write");
-            Err(ApiError::internal(format!("Failed to apply write: {}", e)))
+            Err(ApiError::internal(format!("Failed to apply write: {e}")))
         }
     }
 }
@@ -96,13 +96,31 @@ pub async fn internal_heartbeat(
     }
     cluster.update_heartbeat();
 
-    let sequence = cluster.last_applied_sequence;
+    let my_sequence = cluster.last_applied_sequence;
+    let leader_sequence = req.sequence;
     let term = cluster.current_term;
+    let leader_addr = cluster.leader_address.clone();
+    drop(cluster);
+
+    // If we're behind the leader, trigger a background sync
+    if leader_sequence > my_sequence {
+        if let Some(addr) = leader_addr {
+            let sync_state = Arc::clone(&state);
+            tokio::spawn(async move {
+                if let Err(e) = catchup::request_sync(sync_state, &addr).await {
+                    match e {
+                        catchup::CatchupError::AlreadySyncing => {} // Expected, not an error
+                        _ => tracing::warn!(error = %e, "Background sync failed."),
+                    }
+                }
+            });
+        }
+    }
 
     Json(HeartbeatResponse {
         term,
         success: true,
-        sequence,
+        sequence: my_sequence,
     })
 }
 
@@ -146,6 +164,29 @@ pub async fn internal_vote(
         term: cluster.current_term,
         vote_granted: grant,
     })
+}
+
+// ============================================================================
+// Sync handler (called by followers to catch up)
+// ============================================================================
+
+pub async fn internal_sync(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SyncRequest>,
+) -> Result<Json<SyncResponse>, ApiError> {
+    // Only leader should serve sync requests
+    {
+        let cluster = state.cluster.read().await;
+        if cluster.role != Role::Leader {
+            return Err(ApiError::unavailable("Not the leader."));
+        }
+    }
+
+    let response = catchup::handle_sync_request(state, req.from_sequence)
+        .await
+        .map_err(|e| ApiError::internal(format!("Sync failed: {e}")))?;
+
+    Ok(Json(response))
 }
 
 // ============================================================================

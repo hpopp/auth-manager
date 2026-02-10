@@ -173,7 +173,7 @@ impl Config {
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
                         // Filter out self - peer address starts with node_id (e.g., "node-1:8080" starts with "node-1")
-                        .filter(|s| !s.starts_with(&format!("{}:", &node_id)) && s != &node_id)
+                        .filter(|s| !s.starts_with(&format!("{node_id}:")) && s != &node_id)
                         .collect()
                 })
                 .unwrap_or_default();
@@ -239,12 +239,6 @@ impl Config {
         }
 
         Ok(())
-    }
-
-    /// Calculate the quorum size for the cluster
-    pub fn quorum_size(&self) -> usize {
-        let cluster_size = self.cluster.peers.len() + 1;
-        cluster_size / 2 + 1
     }
 
     /// Check if running in single-node mode
