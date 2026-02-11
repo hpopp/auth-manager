@@ -6,7 +6,7 @@ use thiserror::Error;
 use tracing::{debug, warn};
 
 use super::node::Role;
-use super::rpc::{ReplicateRequest, ReplicateResponse};
+use super::rpc::{ClusterMessage, ReplicateRequest};
 use crate::storage::models::{ReplicatedWrite, WriteOp};
 use crate::storage::Database;
 use crate::AppState;
@@ -71,10 +71,10 @@ pub async fn replicate_write(
         let op = operation.clone();
         let seq = sequence;
         let lid = leader_id.clone();
-        let client = state.http_client.clone();
+        let transport = Arc::clone(&state.transport);
 
         handles.push(tokio::spawn(async move {
-            match send_replicate(&client, &peer_addr, &lid, term, seq, op).await {
+            match send_replicate(&transport, &peer_addr, &lid, term, seq, op).await {
                 Ok(true) => Some(peer_id),
                 Ok(false) => None,
                 Err(e) => {
@@ -129,17 +129,15 @@ fn append_to_log(db: &Database, operation: WriteOp) -> Result<u64, ReplicationEr
     Ok(sequence)
 }
 
-/// Send a replication request to a peer
+/// Send a replication request to a peer over TCP
 async fn send_replicate(
-    client: &reqwest::Client,
+    transport: &super::ClusterTransport,
     peer_addr: &str,
     leader_id: &str,
     term: u64,
     sequence: u64,
     operation: WriteOp,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("http://{peer_addr}/_internal/replicate");
-
     let request = ReplicateRequest {
         leader_id: leader_id.to_string(),
         term,
@@ -147,13 +145,18 @@ async fn send_replicate(
         operation,
     };
 
-    let response = client.post(&url).json(&request).send().await?;
+    let response = transport
+        .send(
+            peer_addr,
+            ClusterMessage::ReplicateRequest(Box::new(request)),
+        )
+        .await?;
 
-    if response.status().is_success() {
-        let resp: ReplicateResponse = response.json().await?;
-        Ok(resp.success)
-    } else {
-        warn!(peer = %peer_addr, status = %response.status(), "Replication request failed");
-        Ok(false)
+    match response {
+        ClusterMessage::ReplicateResponse(resp) => Ok(resp.success),
+        other => {
+            warn!(peer = %peer_addr, "Unexpected replication response: {other:?}");
+            Ok(false)
+        }
     }
 }

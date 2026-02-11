@@ -1,14 +1,18 @@
 pub(crate) mod catchup;
 pub mod discovery;
 mod election;
+pub(crate) mod handlers;
 mod heartbeat;
 mod node;
 mod replication;
 pub mod rpc;
+pub mod server;
+pub mod transport;
 
 pub use discovery::Discovery;
 pub use node::{ClusterState, PeerState, Role};
 pub use replication::{replicate_write, ReplicationError};
+pub use transport::ClusterTransport;
 
 use std::sync::Arc;
 use std::time::Duration;

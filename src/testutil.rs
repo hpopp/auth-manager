@@ -45,12 +45,14 @@ pub fn test_state(db: Database) -> Arc<AppState> {
     let config = test_config();
     let cluster_state = ClusterState::new(&config, &db).unwrap();
     let http_client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let transport = crate::cluster::ClusterTransport::new(config.cluster.cluster_port);
     Arc::new(AppState {
         cluster: RwLock::new(cluster_state),
         config,
         db,
         http_client,
         sync_in_progress: AtomicBool::new(false),
+        transport,
     })
 }
 

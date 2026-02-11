@@ -7,7 +7,7 @@ use tracing::{debug, warn};
 
 use super::discovery;
 use super::node::Role;
-use super::rpc::{HeartbeatRequest, HeartbeatResponse};
+use super::rpc::{ClusterMessage, HeartbeatRequest};
 use crate::AppState;
 
 /// Start the heartbeat task
@@ -42,9 +42,17 @@ pub fn start_heartbeat_task(state: Arc<AppState>) -> JoinHandle<()> {
                     let lid = leader_id.clone();
                     let la = leader_address.clone();
 
-                    let client = state.http_client.clone();
                     tokio::spawn(async move {
-                        match send_heartbeat(&client, &peer_addr, &lid, &la, term, sequence).await {
+                        match send_heartbeat(
+                            &state.transport,
+                            &peer_addr,
+                            &lid,
+                            &la,
+                            term,
+                            sequence,
+                        )
+                        .await
+                        {
                             Ok((peer_term, peer_sequence)) => {
                                 let mut cluster = state.cluster.write().await;
 
@@ -69,17 +77,15 @@ pub fn start_heartbeat_task(state: Arc<AppState>) -> JoinHandle<()> {
     })
 }
 
-/// Send a heartbeat to a peer
+/// Send a heartbeat to a peer over TCP
 async fn send_heartbeat(
-    client: &reqwest::Client,
+    transport: &super::ClusterTransport,
     peer_addr: &str,
     leader_id: &str,
     leader_address: &str,
     term: u64,
     sequence: u64,
 ) -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("http://{peer_addr}/_internal/heartbeat");
-
     let request = HeartbeatRequest {
         leader_address: Some(leader_address.to_string()),
         leader_id: leader_id.to_string(),
@@ -87,12 +93,12 @@ async fn send_heartbeat(
         term,
     };
 
-    let response = client.post(&url).json(&request).send().await?;
+    let response = transport
+        .send(peer_addr, ClusterMessage::HeartbeatRequest(request))
+        .await?;
 
-    if response.status().is_success() {
-        let resp: HeartbeatResponse = response.json().await?;
-        Ok((resp.term, resp.sequence))
-    } else {
-        Err(format!("Heartbeat failed with status: {}", response.status()).into())
+    match response {
+        ClusterMessage::HeartbeatResponse(resp) => Ok((resp.term, resp.sequence)),
+        other => Err(format!("Unexpected response: {other:?}").into()),
     }
 }

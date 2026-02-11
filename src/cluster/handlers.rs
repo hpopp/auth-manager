@@ -1,89 +1,35 @@
-use axum::{extract::State, Json};
+//! Pure cluster message handlers — no Axum dependency.
+//!
+//! Each function takes `Arc<AppState>` + a request struct and returns
+//! a response struct (or error string). The TCP server dispatches
+//! incoming `ClusterMessage` variants to these handlers.
+
 use chrono::Utc;
 use std::sync::Arc;
+use tracing::debug;
 
-use crate::api::response::ApiError;
-use crate::cluster::catchup;
-use crate::cluster::rpc::{
+use super::catchup;
+use super::rpc::{
     HeartbeatRequest, HeartbeatResponse, ReplicateRequest, ReplicateResponse, SyncRequest,
     SyncResponse, VoteRequest, VoteResponse,
 };
-use crate::cluster::Role;
+use super::Role;
 use crate::storage::models::{ReplicatedWrite, WriteOp};
 use crate::AppState;
 
 // ============================================================================
-// Replication handler (called by leader to replicate to followers)
+// Heartbeat
 // ============================================================================
 
-pub async fn internal_replicate(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<ReplicateRequest>,
-) -> Result<Json<ReplicateResponse>, ApiError> {
+pub async fn handle_heartbeat(state: Arc<AppState>, req: HeartbeatRequest) -> HeartbeatResponse {
     let mut cluster = state.cluster.write().await;
 
     if req.term < cluster.current_term {
-        return Ok(Json(ReplicateResponse {
-            success: false,
-            sequence: cluster.last_applied_sequence,
-        }));
-    }
-
-    if req.term > cluster.current_term {
-        cluster.become_follower(req.term, Some(req.leader_id.clone()));
-    }
-
-    cluster.update_heartbeat();
-    drop(cluster);
-
-    match apply_write_op(&state.db, &req.operation) {
-        Ok(()) => {
-            let write = ReplicatedWrite {
-                sequence: req.sequence,
-                operation: req.operation,
-                timestamp: Utc::now(),
-            };
-
-            if let Err(e) = state.db.append_replication_log(&write) {
-                tracing::error!(error = %e, "Failed to append to replication log");
-                return Err(ApiError::internal(format!(
-                    "Failed to append to replication log: {e}"
-                )));
-            }
-
-            let mut cluster = state.cluster.write().await;
-            cluster.last_applied_sequence = req.sequence;
-
-            tracing::debug!(sequence = req.sequence, "Applied replicated write");
-
-            Ok(Json(ReplicateResponse {
-                success: true,
-                sequence: req.sequence,
-            }))
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to apply replicated write");
-            Err(ApiError::internal(format!("Failed to apply write: {e}")))
-        }
-    }
-}
-
-// ============================================================================
-// Heartbeat handler (called by leader to maintain leadership)
-// ============================================================================
-
-pub async fn internal_heartbeat(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<HeartbeatRequest>,
-) -> Json<HeartbeatResponse> {
-    let mut cluster = state.cluster.write().await;
-
-    if req.term < cluster.current_term {
-        return Json(HeartbeatResponse {
+        return HeartbeatResponse {
             term: cluster.current_term,
             success: false,
             sequence: cluster.last_applied_sequence,
-        });
+        };
     }
 
     if req.term > cluster.current_term || cluster.role != Role::Follower {
@@ -109,7 +55,7 @@ pub async fn internal_heartbeat(
             tokio::spawn(async move {
                 if let Err(e) = catchup::request_sync(sync_state, &addr).await {
                     match e {
-                        catchup::CatchupError::AlreadySyncing => {} // Expected, not an error
+                        catchup::CatchupError::AlreadySyncing => {}
                         _ => tracing::warn!(error = %e, "Background sync failed."),
                     }
                 }
@@ -117,28 +63,79 @@ pub async fn internal_heartbeat(
         }
     }
 
-    Json(HeartbeatResponse {
+    HeartbeatResponse {
         term,
         success: true,
         sequence: my_sequence,
-    })
+    }
 }
 
 // ============================================================================
-// Vote handler (called during leader election)
+// Replication
 // ============================================================================
 
-pub async fn internal_vote(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<VoteRequest>,
-) -> Json<VoteResponse> {
+pub async fn handle_replicate(
+    state: Arc<AppState>,
+    req: ReplicateRequest,
+) -> Result<ReplicateResponse, String> {
     let mut cluster = state.cluster.write().await;
 
     if req.term < cluster.current_term {
-        return Json(VoteResponse {
+        return Ok(ReplicateResponse {
+            success: false,
+            sequence: cluster.last_applied_sequence,
+        });
+    }
+
+    if req.term > cluster.current_term {
+        cluster.become_follower(req.term, Some(req.leader_id.clone()));
+    }
+
+    cluster.update_heartbeat();
+    drop(cluster);
+
+    match apply_write_op(&state.db, &req.operation) {
+        Ok(()) => {
+            let write = ReplicatedWrite {
+                sequence: req.sequence,
+                operation: req.operation,
+                timestamp: Utc::now(),
+            };
+
+            if let Err(e) = state.db.append_replication_log(&write) {
+                tracing::error!(error = %e, "Failed to append to replication log");
+                return Err(format!("Failed to append to replication log: {e}"));
+            }
+
+            let mut cluster = state.cluster.write().await;
+            cluster.last_applied_sequence = req.sequence;
+
+            debug!(sequence = req.sequence, "Applied replicated write");
+
+            Ok(ReplicateResponse {
+                success: true,
+                sequence: req.sequence,
+            })
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to apply replicated write");
+            Err(format!("Failed to apply write: {e}"))
+        }
+    }
+}
+
+// ============================================================================
+// Vote
+// ============================================================================
+
+pub async fn handle_vote(state: Arc<AppState>, req: VoteRequest) -> VoteResponse {
+    let mut cluster = state.cluster.write().await;
+
+    if req.term < cluster.current_term {
+        return VoteResponse {
             term: cluster.current_term,
             vote_granted: false,
-        });
+        };
     }
 
     if req.term > cluster.current_term {
@@ -157,36 +154,31 @@ pub async fn internal_vote(
             tracing::warn!(error = %e, "Failed to persist vote");
         }
 
-        tracing::debug!(candidate = %req.candidate_id, term = req.term, "Granted vote");
+        debug!(candidate = %req.candidate_id, term = req.term, "Granted vote");
     }
 
-    Json(VoteResponse {
+    VoteResponse {
         term: cluster.current_term,
         vote_granted: grant,
-    })
+    }
 }
 
 // ============================================================================
-// Sync handler (called by followers to catch up)
+// Sync
 // ============================================================================
 
-pub async fn internal_sync(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<SyncRequest>,
-) -> Result<Json<SyncResponse>, ApiError> {
+pub async fn handle_sync(state: Arc<AppState>, req: SyncRequest) -> Result<SyncResponse, String> {
     // Only leader should serve sync requests
     {
         let cluster = state.cluster.read().await;
         if cluster.role != Role::Leader {
-            return Err(ApiError::unavailable("Not the leader."));
+            return Err("Not the leader.".to_string());
         }
     }
 
-    let response = catchup::handle_sync_request(state, req.from_sequence)
+    catchup::handle_sync_request(state, req.from_sequence)
         .await
-        .map_err(|e| ApiError::internal(format!("Sync failed: {e}")))?;
-
-    Ok(Json(response))
+        .map_err(|e| format!("Sync failed: {e}"))
 }
 
 // ============================================================================

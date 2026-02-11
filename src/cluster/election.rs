@@ -7,7 +7,7 @@ use tracing::{debug, info, warn};
 
 use super::discovery;
 use super::node::Role;
-use super::rpc::{VoteRequest, VoteResponse};
+use super::rpc::{ClusterMessage, VoteRequest};
 use crate::AppState;
 
 /// Start the election monitor task
@@ -97,10 +97,9 @@ async fn request_votes(state: Arc<AppState>) {
     for (peer_id, peer_addr) in peers {
         let state = Arc::clone(&state);
         let node_id = state.config.node.id.clone();
-        let client = state.http_client.clone();
 
         tokio::spawn(async move {
-            match send_vote_request(&client, &peer_addr, &node_id, term, sequence).await {
+            match send_vote_request(&state.transport, &peer_addr, &node_id, term, sequence).await {
                 Ok((peer_term, granted)) => {
                     let mut cluster = state.cluster.write().await;
 
@@ -123,28 +122,26 @@ async fn request_votes(state: Arc<AppState>) {
     }
 }
 
-/// Send a vote request to a peer
+/// Send a vote request to a peer over TCP
 async fn send_vote_request(
-    client: &reqwest::Client,
+    transport: &super::ClusterTransport,
     peer_addr: &str,
     node_id: &str,
     term: u64,
     sequence: u64,
 ) -> Result<(u64, bool), Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("http://{peer_addr}/_internal/vote");
-
     let request = VoteRequest {
         candidate_id: node_id.to_string(),
         term,
         last_sequence: sequence,
     };
 
-    let response = client.post(&url).json(&request).send().await?;
+    let response = transport
+        .send(peer_addr, ClusterMessage::VoteRequest(request))
+        .await?;
 
-    if response.status().is_success() {
-        let resp: VoteResponse = response.json().await?;
-        Ok((resp.term, resp.vote_granted))
-    } else {
-        Err(format!("Vote request failed with status: {}", response.status()).into())
+    match response {
+        ClusterMessage::VoteResponse(resp) => Ok((resp.term, resp.vote_granted)),
+        other => Err(format!("Unexpected response: {other:?}").into()),
     }
 }

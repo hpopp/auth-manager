@@ -19,6 +19,7 @@ pub mod testutil;
 pub mod tokens;
 
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
@@ -30,7 +31,10 @@ pub struct AppState {
     pub cluster: RwLock<cluster::ClusterState>,
     pub config: Config,
     pub db: Database,
+    /// HTTP client retained for leader-forwarding (proxying write requests)
     pub http_client: reqwest::Client,
     /// Guards against concurrent sync/catchup operations
     pub sync_in_progress: AtomicBool,
+    /// TCP transport for inter-node cluster communication
+    pub transport: Arc<cluster::ClusterTransport>,
 }
