@@ -42,17 +42,7 @@ async fn send_heartbeats(state: &Arc<AppState>) {
         let info = info.clone();
 
         tokio::spawn(async move {
-            let result = send_heartbeat(
-                &state.transport,
-                &peer_addr,
-                &info.leader_id,
-                &info.leader_address,
-                info.term,
-                info.sequence,
-            )
-            .await;
-
-            handle_heartbeat_response(&state, &peer_id, result).await;
+            heartbeat_peer(&state, &peer_id, &peer_addr, &info).await;
         });
     }
 }
@@ -82,49 +72,35 @@ fn gather_heartbeat_info(state: &AppState, cluster: &super::ClusterState) -> Hea
     }
 }
 
-/// Send a heartbeat to a peer over TCP
-async fn send_heartbeat(
-    transport: &super::ClusterTransport,
-    peer_addr: &str,
-    leader_id: &str,
-    leader_address: &str,
-    term: u64,
-    sequence: u64,
-) -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
+/// Send a heartbeat to a single peer and process the response.
+/// Steps down if the peer has a higher term, otherwise updates
+/// the peer's status.
+async fn heartbeat_peer(state: &AppState, peer_id: &str, peer_addr: &str, info: &HeartbeatInfo) {
     let request = HeartbeatRequest {
-        leader_address: Some(leader_address.to_string()),
-        leader_id: leader_id.to_string(),
-        sequence,
-        term,
+        leader_address: Some(info.leader_address.clone()),
+        leader_id: info.leader_id.clone(),
+        sequence: info.sequence,
+        term: info.term,
     };
 
-    let response = transport
+    let response = state
+        .transport
         .send(peer_addr, ClusterMessage::HeartbeatRequest(request))
-        .await?;
+        .await;
 
     match response {
-        ClusterMessage::HeartbeatResponse(resp) => Ok((resp.term, resp.sequence)),
-        other => Err(format!("Unexpected response: {other:?}").into()),
-    }
-}
-
-/// Process the result of a heartbeat send. Steps down if the peer
-/// has a higher term, otherwise updates the peer's status.
-async fn handle_heartbeat_response(
-    state: &AppState,
-    peer_id: &str,
-    result: Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>>,
-) {
-    match result {
-        Ok((peer_term, peer_sequence)) => {
+        Ok(ClusterMessage::HeartbeatResponse(resp)) => {
             let mut cluster = state.cluster.write().await;
 
-            if peer_term > cluster.current_term {
-                cluster.become_follower(peer_term, None);
-                warn!(peer_term, "Peer has higher term, stepping down");
+            if resp.term > cluster.current_term {
+                cluster.become_follower(resp.term, None);
+                warn!(peer_term = resp.term, "Peer has higher term, stepping down");
             } else {
-                cluster.update_peer(peer_id, "synced", peer_sequence);
+                cluster.update_peer(peer_id, "synced", resp.sequence);
             }
+        }
+        Ok(other) => {
+            warn!(peer = %peer_id, "Unexpected heartbeat response: {other:?}");
         }
         Err(e) => {
             debug!(peer = %peer_id, error = %e, "Failed to send heartbeat");
