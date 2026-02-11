@@ -21,7 +21,7 @@ pub mod tokens;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use config::Config;
 use storage::Database;
@@ -33,6 +33,9 @@ pub struct AppState {
     pub db: Database,
     /// HTTP client retained for leader-forwarding (proxying write requests)
     pub http_client: reqwest::Client,
+    /// Serializes follower-side replication applies so that log entries are
+    /// written in order and `last_applied_sequence` advances monotonically.
+    pub replication_lock: Mutex<()>,
     /// Guards against concurrent sync/catchup operations
     pub sync_in_progress: AtomicBool,
     /// TCP transport for inter-node cluster communication

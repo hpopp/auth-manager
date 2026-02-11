@@ -1,11 +1,11 @@
 //! TCP transport layer for inter-node cluster communication
 //!
-//! Each peer gets a dedicated background task that owns the TCP connection,
-//! inspired by Erlang's per-connection "dist" process. Callers enqueue
-//! requests via an mpsc channel and await responses via oneshot — no locks
-//! are held by callers during the network round-trip.
+//! Each peer gets a pool of dedicated background tasks, each owning its own
+//! TCP connection. Requests are distributed across the pool via round-robin,
+//! allowing multiple in-flight requests per peer for higher throughput.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use tokio::net::TcpStream;
@@ -15,6 +15,9 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::debug;
 
 use super::rpc::ClusterMessage;
+
+/// Number of TCP connections per peer
+const POOL_SIZE: usize = 4;
 
 /// Error type for transport operations
 #[derive(Debug, thiserror::Error)]
@@ -37,18 +40,39 @@ type PeerConnection = Framed<TcpStream, LengthDelimitedCodec>;
 /// A request sent to a peer's background task
 type PeerRequest = (Vec<u8>, oneshot::Sender<Result<Vec<u8>, TransportError>>);
 
-/// Handle to a peer's background task
+/// Handle to a peer's connection pool.
+///
+/// Each pool contains `POOL_SIZE` background tasks, each owning a separate TCP
+/// connection. Requests are distributed round-robin across the pool.
 struct PeerHandle {
-    tx: mpsc::Sender<PeerRequest>,
+    senders: Vec<mpsc::Sender<PeerRequest>>,
+    next: AtomicUsize,
+}
+
+impl PeerHandle {
+    /// Pick the next live sender in round-robin order.
+    /// Returns `None` only if all connections in the pool are dead.
+    fn pick_sender(&self) -> Option<mpsc::Sender<PeerRequest>> {
+        let len = self.senders.len();
+        let start = self.next.fetch_add(1, Ordering::Relaxed);
+        for i in 0..len {
+            let idx = (start + i) % len;
+            let tx = &self.senders[idx];
+            if !tx.is_closed() {
+                return Some(tx.clone());
+            }
+        }
+        None
+    }
 }
 
 /// Manages outbound TCP connections to cluster peers.
 ///
-/// Each peer is served by a dedicated tokio task that owns the TCP
-/// connection. Callers never hold a lock during network I/O — they
+/// Each peer is served by a pool of `POOL_SIZE` tokio tasks, each owning its
+/// own TCP connection. Callers never hold a lock during network I/O — they
 /// enqueue a request and await a oneshot response.
 pub struct ClusterTransport {
-    /// Per-peer background task handles, keyed by resolved TCP address
+    /// Per-peer connection pool handles, keyed by resolved TCP address
     peers: RwLock<HashMap<String, PeerHandle>>,
     /// The cluster TCP port peers are listening on
     cluster_port: u16,
@@ -64,9 +88,7 @@ impl ClusterTransport {
 
     /// Send a message to a peer and wait for a response.
     ///
-    /// Spawns a per-peer background task on first contact. The caller
-    /// only pays the cost of a channel send + oneshot await — no mutex
-    /// is held during the network round-trip.
+    /// Distributes requests round-robin across the peer's connection pool.
     pub async fn send(
         &self,
         peer_addr: &str,
@@ -111,39 +133,41 @@ impl ClusterTransport {
         Ok(())
     }
 
-    /// Remove a peer's connection (e.g., when peer is known unreachable).
+    /// Remove a peer's connection pool (e.g., when peer is known unreachable).
     ///
-    /// Drops the handle, which closes the channel, which causes the
-    /// background task to exit and drop the TCP connection.
+    /// Drops all handles, which closes all channels, which causes every
+    /// background task in the pool to exit and drop its TCP connection.
     pub async fn disconnect(&self, peer_addr: &str) {
         let tcp_addr = self.resolve_tcp_addr(peer_addr);
         self.peers.write().await.remove(&tcp_addr);
     }
 
-    /// Get an existing peer's channel or spawn a new background task.
+    /// Get an existing peer's sender or spawn a new connection pool.
     async fn get_or_spawn_peer(&self, tcp_addr: &str) -> mpsc::Sender<PeerRequest> {
-        // Fast path: peer already exists (read lock only)
+        // Fast path: peer pool already exists (read lock only)
         {
             let peers = self.peers.read().await;
             if let Some(handle) = peers.get(tcp_addr) {
-                if !handle.tx.is_closed() {
-                    return handle.tx.clone();
+                if let Some(tx) = handle.pick_sender() {
+                    return tx;
                 }
             }
         }
 
-        // Slow path: need to spawn a new peer task (write lock)
+        // Slow path: need to spawn a new pool (write lock)
         let mut peers = self.peers.write().await;
 
         // Double-check after acquiring write lock
         if let Some(handle) = peers.get(tcp_addr) {
-            if !handle.tx.is_closed() {
-                return handle.tx.clone();
+            if let Some(tx) = handle.pick_sender() {
+                return tx;
             }
         }
 
-        let handle = spawn_peer_task(tcp_addr.to_string());
-        let tx = handle.tx.clone();
+        let handle = spawn_peer_pool(tcp_addr.to_string());
+        let tx = handle
+            .pick_sender()
+            .expect("freshly spawned pool must have live senders");
         peers.insert(tcp_addr.to_string(), handle);
         tx
     }
@@ -167,35 +191,45 @@ impl std::fmt::Debug for ClusterTransport {
 }
 
 // ============================================================================
-// Per-peer background task
+// Per-peer connection pool
 // ============================================================================
 
-/// Spawn a dedicated background task for a peer.
+/// Spawn a pool of `POOL_SIZE` background tasks for a peer.
 ///
-/// The task owns the TCP connection and processes requests sequentially
-/// from the mpsc channel. This mirrors Erlang's per-connection "dist"
-/// process: many callers can enqueue concurrently, but writes to the
-/// single TCP stream are naturally serialized.
-fn spawn_peer_task(addr: String) -> PeerHandle {
-    let (tx, mut rx) = mpsc::channel::<PeerRequest>(256);
+/// Each task owns its own TCP connection and processes requests sequentially
+/// from its own mpsc channel. The pool distributes requests round-robin
+/// across the tasks, giving up to `POOL_SIZE` concurrent in-flight requests
+/// per peer.
+fn spawn_peer_pool(addr: String) -> PeerHandle {
+    let mut senders = Vec::with_capacity(POOL_SIZE);
 
-    tokio::spawn(async move {
-        let mut conn: Option<PeerConnection> = None;
+    for conn_idx in 0..POOL_SIZE {
+        let (tx, mut rx) = mpsc::channel::<PeerRequest>(64);
+        let addr = addr.clone();
 
-        while let Some((payload, reply_tx)) = rx.recv().await {
-            let result = peer_send_recv(&mut conn, &addr, &payload).await;
+        tokio::spawn(async move {
+            let mut conn: Option<PeerConnection> = None;
 
-            // Convert BytesMut to Vec<u8> for the reply
-            let result = result.map(|bytes| bytes.to_vec());
+            while let Some((payload, reply_tx)) = rx.recv().await {
+                let result = peer_send_recv(&mut conn, &addr, &payload).await;
 
-            // If the caller dropped the oneshot, that's fine — just discard
-            let _ = reply_tx.send(result);
-        }
+                // Convert BytesMut to Vec<u8> for the reply
+                let result = result.map(|bytes| bytes.to_vec());
 
-        debug!(peer = %addr, "Peer task exiting (channel closed)");
-    });
+                // If the caller dropped the oneshot, that's fine — just discard
+                let _ = reply_tx.send(result);
+            }
 
-    PeerHandle { tx }
+            debug!(peer = %addr, conn_idx, "Peer pool task exiting (channel closed)");
+        });
+
+        senders.push(tx);
+    }
+
+    PeerHandle {
+        senders,
+        next: AtomicUsize::new(0),
+    }
 }
 
 /// Send a payload on the peer connection and read the response.

@@ -17,64 +17,69 @@ pub fn start_heartbeat_task(state: Arc<AppState>) -> JoinHandle<()> {
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(heartbeat_interval);
-
         loop {
             interval.tick().await;
-
-            let cluster = state.cluster.read().await;
-
-            if cluster.role == Role::Leader {
-                let peers: Vec<_> = cluster
-                    .peer_states
-                    .iter()
-                    .map(|(id, p)| (id.clone(), p.address.clone()))
-                    .collect();
-                let term = cluster.current_term;
-                let sequence = cluster.last_applied_sequence;
-                let leader_id = state.config.node.id.clone();
-                let leader_address =
-                    discovery::compute_advertise_address(&state.config.node.bind_address);
-                drop(cluster);
-
-                // Send heartbeats to all peers
-                for (peer_id, peer_addr) in peers {
-                    let state = Arc::clone(&state);
-                    let lid = leader_id.clone();
-                    let la = leader_address.clone();
-
-                    tokio::spawn(async move {
-                        match send_heartbeat(
-                            &state.transport,
-                            &peer_addr,
-                            &lid,
-                            &la,
-                            term,
-                            sequence,
-                        )
-                        .await
-                        {
-                            Ok((peer_term, peer_sequence)) => {
-                                let mut cluster = state.cluster.write().await;
-
-                                // If peer has higher term, step down
-                                if peer_term > cluster.current_term {
-                                    cluster.become_follower(peer_term, None);
-                                    warn!(peer_term, "Peer has higher term, stepping down");
-                                } else {
-                                    cluster.update_peer(&peer_id, "synced", peer_sequence);
-                                }
-                            }
-                            Err(e) => {
-                                debug!(peer = %peer_id, error = %e, "Failed to send heartbeat");
-                                let mut cluster = state.cluster.write().await;
-                                cluster.update_peer(&peer_id, "unreachable", 0);
-                            }
-                        }
-                    });
-                }
-            }
+            send_heartbeats(&state).await;
         }
     })
+}
+
+/// Run one heartbeat round: if we're the leader, send a heartbeat
+/// to every peer in parallel.
+async fn send_heartbeats(state: &Arc<AppState>) {
+    let cluster = state.cluster.read().await;
+    if cluster.role != Role::Leader {
+        return;
+    }
+
+    let info = gather_heartbeat_info(state, &cluster);
+    drop(cluster);
+
+    for (peer_id, peer_addr) in &info.peers {
+        let state = Arc::clone(state);
+        let peer_id = peer_id.clone();
+        let peer_addr = peer_addr.clone();
+        let info = info.clone();
+
+        tokio::spawn(async move {
+            let result = send_heartbeat(
+                &state.transport,
+                &peer_addr,
+                &info.leader_id,
+                &info.leader_address,
+                info.term,
+                info.sequence,
+            )
+            .await;
+
+            handle_heartbeat_response(&state, &peer_id, result).await;
+        });
+    }
+}
+
+/// Snapshot of leader state needed to send heartbeats.
+#[derive(Clone)]
+struct HeartbeatInfo {
+    peers: Vec<(String, String)>,
+    leader_id: String,
+    leader_address: String,
+    term: u64,
+    sequence: u64,
+}
+
+/// Snapshot the cluster info needed for a heartbeat round.
+fn gather_heartbeat_info(state: &AppState, cluster: &super::ClusterState) -> HeartbeatInfo {
+    HeartbeatInfo {
+        peers: cluster
+            .peer_states
+            .iter()
+            .map(|(id, p)| (id.clone(), p.address.clone()))
+            .collect(),
+        leader_id: state.config.node.id.clone(),
+        leader_address: discovery::compute_advertise_address(&state.config.node.bind_address),
+        term: cluster.current_term,
+        sequence: cluster.last_applied_sequence,
+    }
 }
 
 /// Send a heartbeat to a peer over TCP
@@ -100,5 +105,31 @@ async fn send_heartbeat(
     match response {
         ClusterMessage::HeartbeatResponse(resp) => Ok((resp.term, resp.sequence)),
         other => Err(format!("Unexpected response: {other:?}").into()),
+    }
+}
+
+/// Process the result of a heartbeat send. Steps down if the peer
+/// has a higher term, otherwise updates the peer's status.
+async fn handle_heartbeat_response(
+    state: &AppState,
+    peer_id: &str,
+    result: Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>>,
+) {
+    match result {
+        Ok((peer_term, peer_sequence)) => {
+            let mut cluster = state.cluster.write().await;
+
+            if peer_term > cluster.current_term {
+                cluster.become_follower(peer_term, None);
+                warn!(peer_term, "Peer has higher term, stepping down");
+            } else {
+                cluster.update_peer(peer_id, "synced", peer_sequence);
+            }
+        }
+        Err(e) => {
+            debug!(peer = %peer_id, error = %e, "Failed to send heartbeat");
+            let mut cluster = state.cluster.write().await;
+            cluster.update_peer(peer_id, "unreachable", 0);
+        }
     }
 }

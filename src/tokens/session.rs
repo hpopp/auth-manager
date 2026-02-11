@@ -54,15 +54,7 @@ pub fn list(db: &Database, subject_id: Option<&str>) -> Result<Vec<SessionToken>
 
 /// Clean up expired sessions (called by background task)
 pub fn cleanup_expired(db: &Database) -> Result<usize, SessionError> {
-    let sessions = db.get_all_sessions()?;
-    let now = Utc::now();
-    let mut cleaned = 0;
-
-    for session in sessions {
-        if session.is_expired_at(now) && db.delete_session(&session.token)? {
-            cleaned += 1;
-        }
-    }
+    let cleaned = db.delete_expired_sessions()?;
 
     if cleaned > 0 {
         tracing::info!(count = cleaned, "Cleaned up expired sessions");

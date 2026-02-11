@@ -72,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         db,
         http_client,
+        replication_lock: tokio::sync::Mutex::new(()),
         sync_in_progress: std::sync::atomic::AtomicBool::new(false),
         transport,
     });

@@ -20,6 +20,15 @@ use tokio::task::JoinHandle;
 
 use crate::AppState;
 
+/// Guard that checks the current node is the leader.
+pub(crate) async fn ensure_leader(state: &AppState) -> Result<(), ReplicationError> {
+    let cluster = state.cluster.read().await;
+    if cluster.role != Role::Leader {
+        return Err(ReplicationError::NotLeader);
+    }
+    Ok(())
+}
+
 /// Start cluster-related background tasks (heartbeat, election, discovery)
 pub fn start_cluster_tasks(state: Arc<AppState>, discovery: Option<Discovery>) -> JoinHandle<()> {
     tokio::spawn(async move {

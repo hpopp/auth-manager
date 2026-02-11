@@ -51,6 +51,7 @@ pub fn test_state(db: Database) -> Arc<AppState> {
         config,
         db,
         http_client,
+        replication_lock: tokio::sync::Mutex::new(()),
         sync_in_progress: AtomicBool::new(false),
         transport,
     })
