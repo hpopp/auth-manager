@@ -35,13 +35,17 @@ LABEL org.opencontainers.image.version="${VERSION}"
 
 RUN apk add --no-cache ca-certificates curl
 
+# Create non-root user and directories
+RUN addgroup -S auth-manager && adduser -S auth-manager -G auth-manager \
+    && mkdir -p /app /data \
+    && chown auth-manager:auth-manager /app /data
+
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /app/target/release/auth-manager /usr/local/bin/auth-manager
+COPY --from=builder --chown=auth-manager:auth-manager /app/target/release/auth-manager /usr/local/bin/auth-manager
 
-# Create data directory
-RUN mkdir -p /data
+USER auth-manager
 
 EXPOSE 8080 8081
 
