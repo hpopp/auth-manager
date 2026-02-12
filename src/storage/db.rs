@@ -2,7 +2,7 @@ use redb::{Database as RedbDatabase, ReadTransaction, ReadableTable, WriteTransa
 use std::path::Path;
 use thiserror::Error;
 
-use super::models::{ApiKey, NodeState, ReplicatedWrite, SessionToken};
+use super::models::{ApiKey, NodeState, ReplicatedWrite, SessionToken, WriteOp};
 use super::tables::*;
 
 #[derive(Debug, Error)]
@@ -226,6 +226,69 @@ impl Database {
 
         write_txn.commit()?;
         Ok(deleted)
+    }
+
+    /// Scan all sessions, delete expired ones in a single write transaction.
+    /// No intermediate allocations beyond the expired keys collected during scan.
+    pub fn delete_expired_sessions(&self) -> Result<usize, DatabaseError> {
+        let now = chrono::Utc::now();
+
+        // Phase 1: read-only scan to collect expired tokens + their metadata
+        let expired: Vec<(String, String, String)> = {
+            let read_txn = self.begin_read()?;
+            let table = read_txn.open_table(SESSIONS)?;
+            let mut result = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                let session: SessionToken = rmp_serde::from_slice(value.value())?;
+                if session.is_expired_at(now) {
+                    result.push((session.token, session.subject_id, session.id));
+                }
+            }
+            result
+        };
+
+        if expired.is_empty() {
+            return Ok(0);
+        }
+
+        // Phase 2: single write transaction to delete all expired entries
+        let write_txn = self.begin_write()?;
+
+        for (token, subject_id, session_id) in &expired {
+            {
+                let mut table = write_txn.open_table(SESSIONS)?;
+                table.remove(token.as_str())?;
+            }
+
+            let tokens_in_index: Option<Vec<String>> = {
+                let index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
+                let result = index_table.get(subject_id.as_str())?;
+                match result {
+                    Some(data) => Some(rmp_serde::from_slice(data.value())?),
+                    None => None,
+                }
+            };
+
+            if let Some(mut t) = tokens_in_index {
+                t.retain(|v| v != token);
+                let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
+                if t.is_empty() {
+                    index_table.remove(subject_id.as_str())?;
+                } else {
+                    let new_index_data = rmp_serde::to_vec(&t)?;
+                    index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
+                }
+            }
+
+            {
+                let mut id_table = write_txn.open_table(SESSION_IDS)?;
+                id_table.remove(session_id.as_str())?;
+            }
+        }
+
+        write_txn.commit()?;
+        Ok(expired.len())
     }
 
     /// Get all sessions for a resource
@@ -475,6 +538,68 @@ impl Database {
         Ok(deleted)
     }
 
+    /// Scan all API keys, delete expired ones in a single write transaction.
+    pub fn delete_expired_api_keys(&self) -> Result<usize, DatabaseError> {
+        let now = chrono::Utc::now();
+
+        // Phase 1: read-only scan to collect expired key metadata
+        let expired: Vec<(String, String, String)> = {
+            let read_txn = self.begin_read()?;
+            let table = read_txn.open_table(API_KEYS)?;
+            let mut result = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                let api_key: ApiKey = rmp_serde::from_slice(value.value())?;
+                if api_key.is_expired_at(now) {
+                    result.push((api_key.key_hash, api_key.subject_id, api_key.id));
+                }
+            }
+            result
+        };
+
+        if expired.is_empty() {
+            return Ok(0);
+        }
+
+        // Phase 2: single write transaction to delete all expired entries
+        let write_txn = self.begin_write()?;
+
+        for (key_hash, subject_id, api_key_id) in &expired {
+            {
+                let mut table = write_txn.open_table(API_KEYS)?;
+                table.remove(key_hash.as_str())?;
+            }
+
+            let hashes_in_index: Option<Vec<String>> = {
+                let index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
+                let result = index_table.get(subject_id.as_str())?;
+                match result {
+                    Some(data) => Some(rmp_serde::from_slice(data.value())?),
+                    None => None,
+                }
+            };
+
+            if let Some(mut hashes) = hashes_in_index {
+                hashes.retain(|h| h != key_hash);
+                let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
+                if hashes.is_empty() {
+                    index_table.remove(subject_id.as_str())?;
+                } else {
+                    let new_index_data = rmp_serde::to_vec(&hashes)?;
+                    index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
+                }
+            }
+
+            {
+                let mut id_table = write_txn.open_table(API_KEY_IDS)?;
+                id_table.remove(api_key_id.as_str())?;
+            }
+        }
+
+        write_txn.commit()?;
+        Ok(expired.len())
+    }
+
     /// Get all API keys for a resource
     pub fn get_api_keys_by_subject(&self, subject_id: &str) -> Result<Vec<ApiKey>, DatabaseError> {
         let read_txn = self.begin_read()?;
@@ -586,6 +711,37 @@ impl Database {
         }
         write_txn.commit()?;
         Ok(())
+    }
+
+    /// Atomically read the latest sequence, increment it, and append the
+    /// new entry — all in a single write transaction. This prevents the
+    /// TOCTOU race where two concurrent callers read the same sequence
+    /// and silently overwrite each other's log entries.
+    pub fn append_next_replication_log(
+        &self,
+        operation: WriteOp,
+    ) -> Result<ReplicatedWrite, DatabaseError> {
+        let write_txn = self.begin_write()?;
+        let write = {
+            let mut table = write_txn.open_table(REPLICATION_LOG)?;
+
+            let previous_sequence = match table.last()? {
+                Some((key, _)) => key.value(),
+                None => 0,
+            };
+            let sequence = previous_sequence + 1;
+
+            let entry = ReplicatedWrite {
+                sequence,
+                operation,
+                timestamp: chrono::Utc::now(),
+            };
+            let data = rmp_serde::to_vec(&entry)?;
+            table.insert(sequence, data.as_slice())?;
+            entry
+        };
+        write_txn.commit()?;
+        Ok(write)
     }
 
     /// Get replication log entries starting from a sequence number

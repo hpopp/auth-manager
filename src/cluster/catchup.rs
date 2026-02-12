@@ -5,7 +5,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info};
 
-use super::rpc::{Snapshot, SyncRequest, SyncResponse};
+use super::rpc::{ClusterMessage, Snapshot, SyncRequest, SyncResponse};
 use crate::storage::models::WriteOp;
 use crate::storage::Database;
 use crate::AppState;
@@ -51,8 +51,8 @@ async fn do_sync(state: Arc<AppState>, leader_addr: &str) -> Result<(), CatchupE
 
     info!(my_sequence, leader = %leader_addr, "Requesting sync from leader.");
 
-    // Request sync from leader
-    let response = send_sync_request(&state.http_client, leader_addr, my_sequence).await?;
+    // Request sync from leader over TCP
+    let response = send_sync_request(&state.transport, leader_addr, my_sequence).await?;
 
     // Apply snapshot if provided
     if let Some(ref snapshot) = response.snapshot {
@@ -80,34 +80,25 @@ async fn do_sync(state: Arc<AppState>, leader_addr: &str) -> Result<(), CatchupE
     Ok(())
 }
 
-/// Send a sync request to the leader over HTTP.
+/// Send a sync request to the leader over TCP.
 async fn send_sync_request(
-    client: &reqwest::Client,
+    transport: &super::ClusterTransport,
     leader_addr: &str,
     from_sequence: u64,
 ) -> Result<SyncResponse, CatchupError> {
-    let url = format!("http://{leader_addr}/_internal/sync");
-
     let request = SyncRequest { from_sequence };
 
-    let response = client
-        .post(&url)
-        .json(&request)
-        .send()
+    let response = transport
+        .send(leader_addr, ClusterMessage::SyncRequest(request))
         .await
         .map_err(|e| CatchupError::Network(format!("Failed to contact leader: {e}")))?;
 
-    if !response.status().is_success() {
-        return Err(CatchupError::Network(format!(
-            "Leader returned status {}.",
-            response.status()
-        )));
+    match response {
+        ClusterMessage::SyncResponse(resp) => Ok(*resp),
+        other => Err(CatchupError::Network(format!(
+            "Unexpected sync response: {other:?}"
+        ))),
     }
-
-    response
-        .json::<SyncResponse>()
-        .await
-        .map_err(|e| CatchupError::Network(format!("Failed to deserialize sync response: {e}")))
 }
 
 /// Apply a snapshot to the local database

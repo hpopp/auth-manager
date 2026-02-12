@@ -5,6 +5,22 @@ use serde::{Deserialize, Serialize};
 use crate::storage::models::{ApiKey, ReplicatedWrite, SessionToken, WriteOp};
 
 // ============================================================================
+// Envelope — tagged enum for the TCP wire protocol (MessagePack encoded)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Serialize)]
+pub enum ClusterMessage {
+    HeartbeatRequest(HeartbeatRequest),
+    HeartbeatResponse(HeartbeatResponse),
+    ReplicateRequest(Box<ReplicateRequest>),
+    ReplicateResponse(ReplicateResponse),
+    VoteRequest(VoteRequest),
+    VoteResponse(VoteResponse),
+    SyncRequest(SyncRequest),
+    SyncResponse(Box<SyncResponse>),
+}
+
+// ============================================================================
 // Heartbeat
 // ============================================================================
 

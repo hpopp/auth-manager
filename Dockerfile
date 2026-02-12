@@ -43,6 +43,6 @@ COPY --from=builder /app/target/release/auth-manager /usr/local/bin/auth-manager
 # Create data directory
 RUN mkdir -p /data
 
-EXPOSE 8080
+EXPOSE 8080 8081
 
 CMD ["auth-manager"]

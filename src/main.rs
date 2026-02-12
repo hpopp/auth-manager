@@ -56,7 +56,10 @@ async fn main() -> anyhow::Result<()> {
     // Initialize cluster state
     let cluster_state = cluster::ClusterState::new(&config, &db)?;
 
-    // Create shared HTTP client for internal cluster communication
+    // Create TCP transport for inter-node cluster communication
+    let transport = cluster::ClusterTransport::new(config.cluster.cluster_port);
+
+    // Create shared HTTP client for leader-forwarding (write proxying)
     let http_client = reqwest::Client::builder()
         .pool_idle_timeout(std::time::Duration::from_secs(30))
         .pool_max_idle_per_host(2)
@@ -69,7 +72,9 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         db,
         http_client,
+        replication_lock: tokio::sync::Mutex::new(()),
         sync_in_progress: std::sync::atomic::AtomicBool::new(false),
+        transport,
     });
 
     // Run initial peer discovery before starting cluster tasks
@@ -92,12 +97,14 @@ async fn main() -> anyhow::Result<()> {
     // Start background tasks
     let expiration_handle = expiration::start_expiration_cleaner(Arc::clone(&state));
 
-    // Start cluster tasks (heartbeat, election, discovery) if in cluster mode
-    let cluster_handle = if !config.is_single_node() {
-        Some(cluster::start_cluster_tasks(Arc::clone(&state), discovery))
+    // Start TCP cluster server and cluster tasks if in cluster mode
+    let (cluster_server_handle, cluster_handle) = if !config.is_single_node() {
+        let server_handle = cluster::server::start_cluster_server(Arc::clone(&state));
+        let tasks_handle = cluster::start_cluster_tasks(Arc::clone(&state), discovery);
+        (Some(server_handle), Some(tasks_handle))
     } else {
         info!("Running in single-node mode (no peers configured)");
-        None
+        (None, None)
     };
 
     // Build and start the HTTP server
@@ -112,6 +119,9 @@ async fn main() -> anyhow::Result<()> {
     // Cleanup: abort background tasks
     info!("Shutting down background tasks");
     expiration_handle.abort();
+    if let Some(handle) = cluster_server_handle {
+        handle.abort();
+    }
     if let Some(handle) = cluster_handle {
         handle.abort();
     }

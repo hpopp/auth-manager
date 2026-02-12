@@ -35,6 +35,9 @@ pub struct NodeConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterConfig {
+    /// TCP port for inter-node cluster communication
+    #[serde(default = "default_cluster_port")]
+    pub cluster_port: u16,
     #[serde(default)]
     pub discovery: DiscoveryConfig,
     #[serde(default = "default_election_timeout_ms")]
@@ -84,6 +87,10 @@ fn default_bind_address() -> String {
 
 fn default_data_dir() -> String {
     "./data".to_string()
+}
+
+fn default_cluster_port() -> u16 {
+    8081
 }
 
 fn default_heartbeat_interval_ms() -> u64 {
@@ -136,6 +143,7 @@ impl Default for DiscoveryConfig {
 impl Default for ClusterConfig {
     fn default() -> Self {
         Self {
+            cluster_port: default_cluster_port(),
             discovery: DiscoveryConfig::default(),
             election_timeout_ms: default_election_timeout_ms(),
             heartbeat_interval_ms: default_heartbeat_interval_ms(),
@@ -196,6 +204,11 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(default_poll_interval_seconds());
 
+            let cluster_port = std::env::var("CLUSTER_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(default_cluster_port());
+
             let test_mode = std::env::var("TEST_MODE")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false);
@@ -207,6 +220,7 @@ impl Config {
                     data_dir,
                 },
                 cluster: ClusterConfig {
+                    cluster_port,
                     peers,
                     discovery: DiscoveryConfig {
                         strategy: discovery_strategy,

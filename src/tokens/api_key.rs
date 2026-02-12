@@ -54,15 +54,7 @@ pub fn list(db: &Database, subject_id: Option<&str>) -> Result<Vec<ApiKey>, ApiK
 
 /// Clean up expired API keys (called by background task)
 pub fn cleanup_expired(db: &Database) -> Result<usize, ApiKeyError> {
-    let keys = db.get_all_api_keys()?;
-    let now = Utc::now();
-    let mut cleaned = 0;
-
-    for api_key in keys {
-        if api_key.is_expired_at(now) && db.delete_api_key(&api_key.key_hash)? {
-            cleaned += 1;
-        }
-    }
+    let cleaned = db.delete_expired_api_keys()?;
 
     if cleaned > 0 {
         tracing::info!(count = cleaned, "Cleaned up expired API keys");
