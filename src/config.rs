@@ -90,7 +90,7 @@ fn default_data_dir() -> String {
 }
 
 fn default_cluster_port() -> u16 {
-    8081
+    9993
 }
 
 fn default_heartbeat_interval_ms() -> u64 {
