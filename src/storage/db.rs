@@ -2,21 +2,20 @@ use redb::{Database as RedbDatabase, ReadTransaction, ReadableTable, WriteTransa
 use std::path::Path;
 use thiserror::Error;
 
-use super::models::{ApiKey, NodeState, ReplicatedWrite, SessionToken, WriteOp};
 use super::tables::*;
 
 #[derive(Debug, Error)]
 pub enum DatabaseError {
     #[error("Commit error: {0}")]
     Commit(Box<redb::CommitError>),
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
     #[error("Database error: {0}")]
     Redb(Box<redb::Error>),
     #[error("Database error: {0}")]
     RedbDatabase(Box<redb::DatabaseError>),
     #[error("Deserialization error: {0}")]
     Deserialization(#[from] rmp_serde::decode::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("Serialization error: {0}")]
     Serialization(#[from] rmp_serde::encode::Error),
     #[error("Storage error: {0}")]
@@ -67,6 +66,14 @@ pub struct Database {
     db: RedbDatabase,
 }
 
+/// Statistics from a purge operation
+#[derive(Debug, Default)]
+pub struct PurgeStats {
+    pub api_keys: u64,
+    pub replication_entries: u64,
+    pub sessions: u64,
+}
+
 impl Database {
     /// Open or create a database at the given path
     pub fn open<P: AsRef<Path>>(data_dir: P) -> Result<Self, DatabaseError> {
@@ -78,14 +85,14 @@ impl Database {
         let write_txn = db.begin_write()?;
         {
             // Create tables if they don't exist
-            let _ = write_txn.open_table(SESSIONS)?;
+            let _ = write_txn.open_table(API_KEY_IDS)?;
             let _ = write_txn.open_table(API_KEYS)?;
-            let _ = write_txn.open_table(REPLICATION_LOG)?;
             let _ = write_txn.open_table(NODE_META)?;
+            let _ = write_txn.open_table(REPLICATION_LOG)?;
+            let _ = write_txn.open_table(SESSION_IDS)?;
+            let _ = write_txn.open_table(SESSIONS)?;
             let _ = write_txn.open_table(SUBJECT_API_KEYS)?;
             let _ = write_txn.open_table(SUBJECT_SESSIONS)?;
-            let _ = write_txn.open_table(SESSION_IDS)?;
-            let _ = write_txn.open_table(API_KEY_IDS)?;
         }
         write_txn.commit()?;
 
@@ -103,681 +110,6 @@ impl Database {
     }
 
     // ========================================================================
-    // Session operations
-    // ========================================================================
-
-    /// Store a session token
-    pub fn put_session(&self, session: &SessionToken) -> Result<(), DatabaseError> {
-        debug_assert!(!session.token.is_empty(), "session token must not be empty");
-        debug_assert!(!session.id.is_empty(), "session id must not be empty");
-        debug_assert!(
-            !session.subject_id.is_empty(),
-            "session subject_id must not be empty"
-        );
-
-        let write_txn = self.begin_write()?;
-        {
-            let mut table = write_txn.open_table(SESSIONS)?;
-            let data = rmp_serde::to_vec(session)?;
-            table.insert(session.token.as_str(), data.as_slice())?;
-
-            // Update resource_sessions index (keyed by token)
-            let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
-            let mut tokens: Vec<String> = index_table
-                .get(session.subject_id.as_str())?
-                .map(|v| rmp_serde::from_slice(v.value()).unwrap_or_default())
-                .unwrap_or_default();
-
-            if !tokens.contains(&session.token) {
-                tokens.push(session.token.clone());
-                let index_data = rmp_serde::to_vec(&tokens)?;
-                index_table.insert(session.subject_id.as_str(), index_data.as_slice())?;
-            }
-
-            // Update session ID index (UUID -> token)
-            let mut id_table = write_txn.open_table(SESSION_IDS)?;
-            id_table.insert(session.id.as_str(), session.token.as_str())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    /// Get a session by its secret token value
-    pub fn get_session(&self, token: &str) -> Result<Option<SessionToken>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(SESSIONS)?;
-
-        match table.get(token)? {
-            Some(data) => {
-                let session: SessionToken = rmp_serde::from_slice(data.value())?;
-                Ok(Some(session))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Resolve a session UUID to its secret token value
-    pub fn get_session_token_by_id(&self, id: &str) -> Result<Option<String>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(SESSION_IDS)?;
-
-        match table.get(id)? {
-            Some(data) => Ok(Some(data.value().to_string())),
-            None => Ok(None),
-        }
-    }
-
-    /// Delete a session by its secret token value
-    pub fn delete_session(&self, token: &str) -> Result<bool, DatabaseError> {
-        let write_txn = self.begin_write()?;
-
-        // First, get the session for index cleanup
-        let session_info: Option<(String, String)> = {
-            let table = write_txn.open_table(SESSIONS)?;
-            let result = table.get(token)?;
-            match result {
-                Some(data) => {
-                    let session: SessionToken = rmp_serde::from_slice(data.value())?;
-                    Some((session.subject_id, session.id))
-                }
-                None => None,
-            }
-        };
-
-        let deleted = match session_info {
-            Some((subject_id, session_id)) => {
-                // Remove from sessions table
-                {
-                    let mut table = write_txn.open_table(SESSIONS)?;
-                    table.remove(token)?;
-                }
-
-                // Update resource_sessions index
-                let tokens: Option<Vec<String>> = {
-                    let index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
-                    let result = index_table.get(subject_id.as_str())?;
-                    match result {
-                        Some(data) => Some(rmp_serde::from_slice(data.value())?),
-                        None => None,
-                    }
-                };
-
-                if let Some(mut t) = tokens {
-                    t.retain(|v| v != token);
-                    let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
-                    if t.is_empty() {
-                        index_table.remove(subject_id.as_str())?;
-                    } else {
-                        let new_index_data = rmp_serde::to_vec(&t)?;
-                        index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
-                    }
-                }
-
-                // Remove from session ID index
-                {
-                    let mut id_table = write_txn.open_table(SESSION_IDS)?;
-                    id_table.remove(session_id.as_str())?;
-                }
-
-                true
-            }
-            None => false,
-        };
-
-        write_txn.commit()?;
-        Ok(deleted)
-    }
-
-    /// Scan all sessions, delete expired ones in a single write transaction.
-    /// No intermediate allocations beyond the expired keys collected during scan.
-    pub fn delete_expired_sessions(&self) -> Result<usize, DatabaseError> {
-        let now = chrono::Utc::now();
-
-        // Phase 1: read-only scan to collect expired tokens + their metadata
-        let expired: Vec<(String, String, String)> = {
-            let read_txn = self.begin_read()?;
-            let table = read_txn.open_table(SESSIONS)?;
-            let mut result = Vec::new();
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                let session: SessionToken = rmp_serde::from_slice(value.value())?;
-                if session.is_expired_at(now) {
-                    result.push((session.token, session.subject_id, session.id));
-                }
-            }
-            result
-        };
-
-        if expired.is_empty() {
-            return Ok(0);
-        }
-
-        // Phase 2: single write transaction to delete all expired entries
-        let write_txn = self.begin_write()?;
-
-        for (token, subject_id, session_id) in &expired {
-            {
-                let mut table = write_txn.open_table(SESSIONS)?;
-                table.remove(token.as_str())?;
-            }
-
-            let tokens_in_index: Option<Vec<String>> = {
-                let index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
-                let result = index_table.get(subject_id.as_str())?;
-                match result {
-                    Some(data) => Some(rmp_serde::from_slice(data.value())?),
-                    None => None,
-                }
-            };
-
-            if let Some(mut t) = tokens_in_index {
-                t.retain(|v| v != token);
-                let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
-                if t.is_empty() {
-                    index_table.remove(subject_id.as_str())?;
-                } else {
-                    let new_index_data = rmp_serde::to_vec(&t)?;
-                    index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
-                }
-            }
-
-            {
-                let mut id_table = write_txn.open_table(SESSION_IDS)?;
-                id_table.remove(session_id.as_str())?;
-            }
-        }
-
-        write_txn.commit()?;
-        Ok(expired.len())
-    }
-
-    /// Get all sessions for a resource
-    pub fn get_sessions_by_subject(
-        &self,
-        subject_id: &str,
-    ) -> Result<Vec<SessionToken>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let index_table = read_txn.open_table(SUBJECT_SESSIONS)?;
-        let sessions_table = read_txn.open_table(SESSIONS)?;
-
-        let token_ids: Vec<String> = match index_table.get(subject_id)? {
-            Some(data) => rmp_serde::from_slice(data.value())?,
-            None => return Ok(Vec::new()),
-        };
-
-        let mut sessions = Vec::new();
-        for token_id in token_ids {
-            if let Some(data) = sessions_table.get(token_id.as_str())? {
-                let session: SessionToken = rmp_serde::from_slice(data.value())?;
-                sessions.push(session);
-            }
-        }
-
-        Ok(sessions)
-    }
-
-    /// Get a session by its UUID (resolves ID -> token -> session)
-    pub fn get_session_by_id(&self, id: &str) -> Result<Option<SessionToken>, DatabaseError> {
-        let token = match self.get_session_token_by_id(id)? {
-            Some(t) => t,
-            None => return Ok(None),
-        };
-        self.get_session(&token)
-    }
-
-    /// Update last_used_at for a session (local-only, no replication)
-    pub fn touch_session(&self, token: &str) -> Result<(), DatabaseError> {
-        let write_txn = self.begin_write()?;
-        let existing = {
-            let table = write_txn.open_table(SESSIONS)?;
-            let result = match table.get(token)? {
-                Some(data) => Some(rmp_serde::from_slice::<SessionToken>(data.value())?),
-                None => None,
-            };
-            result
-        };
-        if let Some(mut session) = existing {
-            session.last_used_at = Some(chrono::Utc::now());
-            let serialized = rmp_serde::to_vec(&session)?;
-            let mut table = write_txn.open_table(SESSIONS)?;
-            table.insert(token, serialized.as_slice())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    /// Get all sessions (for expiration cleanup)
-    pub fn get_all_sessions(&self) -> Result<Vec<SessionToken>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(SESSIONS)?;
-
-        let mut sessions = Vec::new();
-        for result in table.iter()? {
-            let (_, value) = result?;
-            let session: SessionToken = rmp_serde::from_slice(value.value())?;
-            sessions.push(session);
-        }
-
-        Ok(sessions)
-    }
-
-    // ========================================================================
-    // API key operations
-    // ========================================================================
-
-    /// Store an API key
-    pub fn put_api_key(&self, api_key: &ApiKey) -> Result<(), DatabaseError> {
-        debug_assert!(
-            !api_key.key_hash.is_empty(),
-            "API key hash must not be empty"
-        );
-        debug_assert!(!api_key.id.is_empty(), "API key id must not be empty");
-        debug_assert!(
-            !api_key.subject_id.is_empty(),
-            "API key subject_id must not be empty"
-        );
-
-        let write_txn = self.begin_write()?;
-        {
-            let mut table = write_txn.open_table(API_KEYS)?;
-            let data = rmp_serde::to_vec(api_key)?;
-            table.insert(api_key.key_hash.as_str(), data.as_slice())?;
-
-            // Update resource_api_keys index
-            let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
-            let mut key_hashes: Vec<String> = index_table
-                .get(api_key.subject_id.as_str())?
-                .map(|v| rmp_serde::from_slice(v.value()).unwrap_or_default())
-                .unwrap_or_default();
-
-            if !key_hashes.contains(&api_key.key_hash) {
-                key_hashes.push(api_key.key_hash.clone());
-                let index_data = rmp_serde::to_vec(&key_hashes)?;
-                index_table.insert(api_key.subject_id.as_str(), index_data.as_slice())?;
-            }
-
-            // Update API key ID index (UUID -> key_hash)
-            let mut id_table = write_txn.open_table(API_KEY_IDS)?;
-            id_table.insert(api_key.id.as_str(), api_key.key_hash.as_str())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    /// Get an API key by hash
-    pub fn get_api_key(&self, key_hash: &str) -> Result<Option<ApiKey>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(API_KEYS)?;
-
-        match table.get(key_hash)? {
-            Some(data) => {
-                let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
-                Ok(Some(api_key))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Update an API key's mutable fields
-    pub fn update_api_key(
-        &self,
-        key_hash: &str,
-        name: Option<&str>,
-        description: Option<Option<&str>>,
-        scopes: Option<&[String]>,
-    ) -> Result<bool, DatabaseError> {
-        let write_txn = self.begin_write()?;
-
-        // Read the existing key first
-        let existing = {
-            let table = write_txn.open_table(API_KEYS)?;
-            let result = match table.get(key_hash)? {
-                Some(data) => {
-                    let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
-                    Some(api_key)
-                }
-                None => None,
-            };
-            result
-        };
-
-        let updated = match existing {
-            Some(mut api_key) => {
-                if let Some(n) = name {
-                    api_key.name = n.to_string();
-                }
-                if let Some(d) = description {
-                    api_key.description = d.map(|s| s.to_string());
-                }
-                if let Some(s) = scopes {
-                    api_key.scopes = s.to_vec();
-                }
-                api_key.updated_at = Some(chrono::Utc::now());
-
-                let serialized = rmp_serde::to_vec(&api_key)?;
-                let mut table = write_txn.open_table(API_KEYS)?;
-                table.insert(key_hash, serialized.as_slice())?;
-                true
-            }
-            None => false,
-        };
-
-        write_txn.commit()?;
-        Ok(updated)
-    }
-
-    /// Resolve an API key UUID to its key_hash
-    pub fn get_api_key_hash_by_id(&self, id: &str) -> Result<Option<String>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(API_KEY_IDS)?;
-
-        match table.get(id)? {
-            Some(data) => Ok(Some(data.value().to_string())),
-            None => Ok(None),
-        }
-    }
-
-    /// Delete an API key
-    pub fn delete_api_key(&self, key_hash: &str) -> Result<bool, DatabaseError> {
-        let write_txn = self.begin_write()?;
-
-        // First, get the API key for index cleanup
-        let api_key_info: Option<(String, String)> = {
-            let table = write_txn.open_table(API_KEYS)?;
-            let result = table.get(key_hash)?;
-            match result {
-                Some(data) => {
-                    let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
-                    Some((api_key.subject_id, api_key.id))
-                }
-                None => None,
-            }
-        };
-
-        let deleted = match api_key_info {
-            Some((subject_id, api_key_id)) => {
-                // Remove from api_keys table
-                {
-                    let mut table = write_txn.open_table(API_KEYS)?;
-                    table.remove(key_hash)?;
-                }
-
-                // Update resource_api_keys index
-                let key_hashes: Option<Vec<String>> = {
-                    let index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
-                    let result = index_table.get(subject_id.as_str())?;
-                    match result {
-                        Some(data) => Some(rmp_serde::from_slice(data.value())?),
-                        None => None,
-                    }
-                };
-
-                if let Some(mut hashes) = key_hashes {
-                    hashes.retain(|h| h != key_hash);
-                    let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
-                    if hashes.is_empty() {
-                        index_table.remove(subject_id.as_str())?;
-                    } else {
-                        let new_index_data = rmp_serde::to_vec(&hashes)?;
-                        index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
-                    }
-                }
-
-                // Remove from API key ID index
-                {
-                    let mut id_table = write_txn.open_table(API_KEY_IDS)?;
-                    id_table.remove(api_key_id.as_str())?;
-                }
-
-                true
-            }
-            None => false,
-        };
-
-        write_txn.commit()?;
-        Ok(deleted)
-    }
-
-    /// Scan all API keys, delete expired ones in a single write transaction.
-    pub fn delete_expired_api_keys(&self) -> Result<usize, DatabaseError> {
-        let now = chrono::Utc::now();
-
-        // Phase 1: read-only scan to collect expired key metadata
-        let expired: Vec<(String, String, String)> = {
-            let read_txn = self.begin_read()?;
-            let table = read_txn.open_table(API_KEYS)?;
-            let mut result = Vec::new();
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                let api_key: ApiKey = rmp_serde::from_slice(value.value())?;
-                if api_key.is_expired_at(now) {
-                    result.push((api_key.key_hash, api_key.subject_id, api_key.id));
-                }
-            }
-            result
-        };
-
-        if expired.is_empty() {
-            return Ok(0);
-        }
-
-        // Phase 2: single write transaction to delete all expired entries
-        let write_txn = self.begin_write()?;
-
-        for (key_hash, subject_id, api_key_id) in &expired {
-            {
-                let mut table = write_txn.open_table(API_KEYS)?;
-                table.remove(key_hash.as_str())?;
-            }
-
-            let hashes_in_index: Option<Vec<String>> = {
-                let index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
-                let result = index_table.get(subject_id.as_str())?;
-                match result {
-                    Some(data) => Some(rmp_serde::from_slice(data.value())?),
-                    None => None,
-                }
-            };
-
-            if let Some(mut hashes) = hashes_in_index {
-                hashes.retain(|h| h != key_hash);
-                let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
-                if hashes.is_empty() {
-                    index_table.remove(subject_id.as_str())?;
-                } else {
-                    let new_index_data = rmp_serde::to_vec(&hashes)?;
-                    index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
-                }
-            }
-
-            {
-                let mut id_table = write_txn.open_table(API_KEY_IDS)?;
-                id_table.remove(api_key_id.as_str())?;
-            }
-        }
-
-        write_txn.commit()?;
-        Ok(expired.len())
-    }
-
-    /// Get all API keys for a resource
-    pub fn get_api_keys_by_subject(&self, subject_id: &str) -> Result<Vec<ApiKey>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let index_table = read_txn.open_table(SUBJECT_API_KEYS)?;
-        let keys_table = read_txn.open_table(API_KEYS)?;
-
-        let key_hashes: Vec<String> = match index_table.get(subject_id)? {
-            Some(data) => rmp_serde::from_slice(data.value())?,
-            None => return Ok(Vec::new()),
-        };
-
-        let mut api_keys = Vec::new();
-        for key_hash in key_hashes {
-            if let Some(data) = keys_table.get(key_hash.as_str())? {
-                let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
-                api_keys.push(api_key);
-            }
-        }
-
-        Ok(api_keys)
-    }
-
-    /// Get an API key by its UUID (resolves ID -> key_hash -> api_key)
-    pub fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>, DatabaseError> {
-        let key_hash = match self.get_api_key_hash_by_id(id)? {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-        self.get_api_key(&key_hash)
-    }
-
-    /// Update last_used_at for an API key (local-only, no replication)
-    pub fn touch_api_key(&self, key_hash: &str) -> Result<(), DatabaseError> {
-        let write_txn = self.begin_write()?;
-        let existing = {
-            let table = write_txn.open_table(API_KEYS)?;
-            let result = match table.get(key_hash)? {
-                Some(data) => Some(rmp_serde::from_slice::<ApiKey>(data.value())?),
-                None => None,
-            };
-            result
-        };
-        if let Some(mut api_key) = existing {
-            api_key.last_used_at = Some(chrono::Utc::now());
-            let serialized = rmp_serde::to_vec(&api_key)?;
-            let mut table = write_txn.open_table(API_KEYS)?;
-            table.insert(key_hash, serialized.as_slice())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    /// Get all API keys (for expiration cleanup)
-    pub fn get_all_api_keys(&self) -> Result<Vec<ApiKey>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(API_KEYS)?;
-
-        let mut keys = Vec::new();
-        for result in table.iter()? {
-            let (_, value) = result?;
-            let api_key: ApiKey = rmp_serde::from_slice(value.value())?;
-            keys.push(api_key);
-        }
-
-        Ok(keys)
-    }
-
-    // ========================================================================
-    // Node state operations
-    // ========================================================================
-
-    /// Get the node state
-    pub fn get_node_state(&self) -> Result<Option<NodeState>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(NODE_META)?;
-
-        match table.get("state")? {
-            Some(data) => {
-                let state: NodeState = rmp_serde::from_slice(data.value())?;
-                Ok(Some(state))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Save the node state
-    pub fn put_node_state(&self, state: &NodeState) -> Result<(), DatabaseError> {
-        let write_txn = self.begin_write()?;
-        {
-            let mut table = write_txn.open_table(NODE_META)?;
-            let data = rmp_serde::to_vec(state)?;
-            table.insert("state", data.as_slice())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    // ========================================================================
-    // Replication log operations
-    // ========================================================================
-
-    /// Append a write to the replication log
-    pub fn append_replication_log(&self, write: &ReplicatedWrite) -> Result<(), DatabaseError> {
-        let write_txn = self.begin_write()?;
-        {
-            let mut table = write_txn.open_table(REPLICATION_LOG)?;
-            let data = rmp_serde::to_vec(write)?;
-            table.insert(write.sequence, data.as_slice())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    /// Atomically read the latest sequence, increment it, and append the
-    /// new entry — all in a single write transaction. This prevents the
-    /// TOCTOU race where two concurrent callers read the same sequence
-    /// and silently overwrite each other's log entries.
-    pub fn append_next_replication_log(
-        &self,
-        operation: WriteOp,
-    ) -> Result<ReplicatedWrite, DatabaseError> {
-        let write_txn = self.begin_write()?;
-        let write = {
-            let mut table = write_txn.open_table(REPLICATION_LOG)?;
-
-            let previous_sequence = match table.last()? {
-                Some((key, _)) => key.value(),
-                None => 0,
-            };
-            let sequence = previous_sequence + 1;
-
-            let entry = ReplicatedWrite {
-                sequence,
-                operation,
-                timestamp: chrono::Utc::now(),
-            };
-            let data = rmp_serde::to_vec(&entry)?;
-            table.insert(sequence, data.as_slice())?;
-            entry
-        };
-        write_txn.commit()?;
-        Ok(write)
-    }
-
-    /// Get replication log entries starting from a sequence number
-    pub fn get_replication_log_from(
-        &self,
-        from_sequence: u64,
-    ) -> Result<Vec<ReplicatedWrite>, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(REPLICATION_LOG)?;
-
-        let mut entries = Vec::new();
-        for result in table.range(from_sequence..)? {
-            let (_, value) = result?;
-            let entry: ReplicatedWrite = rmp_serde::from_slice(value.value())?;
-            entries.push(entry);
-        }
-
-        Ok(entries)
-    }
-
-    /// Get the latest sequence number
-    pub fn get_latest_sequence(&self) -> Result<u64, DatabaseError> {
-        let read_txn = self.begin_read()?;
-        let table = read_txn.open_table(REPLICATION_LOG)?;
-
-        let result = table.last()?;
-        match result {
-            Some((key, _)) => {
-                let seq = key.value();
-                Ok(seq)
-            }
-            None => Ok(0),
-        }
-    }
-
-    // ========================================================================
     // Admin operations
     // ========================================================================
 
@@ -786,47 +118,16 @@ impl Database {
         let write_txn = self.begin_write()?;
         let mut stats = PurgeStats::default();
 
-        // Clear sessions - collect keys first, then remove
+        // Clear API key ID index
         {
-            let table = write_txn.open_table(SESSIONS)?;
+            let table = write_txn.open_table(API_KEY_IDS)?;
             let keys: Vec<String> = table
                 .iter()?
                 .map(|r| r.map(|(k, _)| k.value().to_string()))
                 .collect::<Result<Vec<_>, _>>()?;
             drop(table);
 
-            let mut table = write_txn.open_table(SESSIONS)?;
-            for key in keys {
-                table.remove(key.as_str())?;
-                stats.sessions += 1;
-            }
-        }
-
-        // Clear resource_sessions index
-        {
-            let table = write_txn.open_table(SUBJECT_SESSIONS)?;
-            let keys: Vec<String> = table
-                .iter()?
-                .map(|r| r.map(|(k, _)| k.value().to_string()))
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(table);
-
-            let mut table = write_txn.open_table(SUBJECT_SESSIONS)?;
-            for key in keys {
-                table.remove(key.as_str())?;
-            }
-        }
-
-        // Clear session ID index
-        {
-            let table = write_txn.open_table(SESSION_IDS)?;
-            let keys: Vec<String> = table
-                .iter()?
-                .map(|r| r.map(|(k, _)| k.value().to_string()))
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(table);
-
-            let mut table = write_txn.open_table(SESSION_IDS)?;
+            let mut table = write_txn.open_table(API_KEY_IDS)?;
             for key in keys {
                 table.remove(key.as_str())?;
             }
@@ -848,21 +149,6 @@ impl Database {
             }
         }
 
-        // Clear API key ID index
-        {
-            let table = write_txn.open_table(API_KEY_IDS)?;
-            let keys: Vec<String> = table
-                .iter()?
-                .map(|r| r.map(|(k, _)| k.value().to_string()))
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(table);
-
-            let mut table = write_txn.open_table(API_KEY_IDS)?;
-            for key in keys {
-                table.remove(key.as_str())?;
-            }
-        }
-
         // Clear replication log
         {
             let table = write_txn.open_table(REPLICATION_LOG)?;
@@ -879,15 +165,68 @@ impl Database {
             }
         }
 
+        // Clear session ID index
+        {
+            let table = write_txn.open_table(SESSION_IDS)?;
+            let keys: Vec<String> = table
+                .iter()?
+                .map(|r| r.map(|(k, _)| k.value().to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(table);
+
+            let mut table = write_txn.open_table(SESSION_IDS)?;
+            for key in keys {
+                table.remove(key.as_str())?;
+            }
+        }
+
+        // Clear sessions
+        {
+            let table = write_txn.open_table(SESSIONS)?;
+            let keys: Vec<String> = table
+                .iter()?
+                .map(|r| r.map(|(k, _)| k.value().to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(table);
+
+            let mut table = write_txn.open_table(SESSIONS)?;
+            for key in keys {
+                table.remove(key.as_str())?;
+                stats.sessions += 1;
+            }
+        }
+
+        // Clear subject API keys index
+        {
+            let table = write_txn.open_table(SUBJECT_API_KEYS)?;
+            let keys: Vec<String> = table
+                .iter()?
+                .map(|r| r.map(|(k, _)| k.value().to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(table);
+
+            let mut table = write_txn.open_table(SUBJECT_API_KEYS)?;
+            for key in keys {
+                table.remove(key.as_str())?;
+            }
+        }
+
+        // Clear subject sessions index
+        {
+            let table = write_txn.open_table(SUBJECT_SESSIONS)?;
+            let keys: Vec<String> = table
+                .iter()?
+                .map(|r| r.map(|(k, _)| k.value().to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(table);
+
+            let mut table = write_txn.open_table(SUBJECT_SESSIONS)?;
+            for key in keys {
+                table.remove(key.as_str())?;
+            }
+        }
+
         write_txn.commit()?;
         Ok(stats)
     }
-}
-
-/// Statistics from a purge operation
-#[derive(Debug, Default)]
-pub struct PurgeStats {
-    pub sessions: u64,
-    pub api_keys: u64,
-    pub replication_entries: u64,
 }
