@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Clustering TCP socket port default to 9993.
 - Set Dockerfile uid and gid to 993.
+- Faster startup, cluster elections, and heartbeats.
 
 [#9](https://github.com/hpopp/auth-manager/pull/9)
 

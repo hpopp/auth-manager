@@ -77,23 +77,6 @@ async fn main() -> anyhow::Result<()> {
         transport,
     });
 
-    // Run initial peer discovery before starting cluster tasks
-    if let Some(ref disc) = discovery {
-        match disc.discover_peers().await {
-            Ok(peers) => {
-                let mut cluster = state.cluster.write().await;
-                cluster.update_discovered_peers(peers);
-                info!(
-                    "Initial discovery found {} peer(s)",
-                    cluster.peer_states.len()
-                );
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Initial peer discovery failed (will retry in background)");
-            }
-        }
-    }
-
     // Start background tasks
     let expiration_handle = expiration::start_expiration_cleaner(Arc::clone(&state));
 
@@ -107,7 +90,8 @@ async fn main() -> anyhow::Result<()> {
         (None, None)
     };
 
-    // Build and start the HTTP server
+    // Build and start the HTTP server — bind before initial discovery
+    // so health probes can respond immediately
     let app = api::create_router(Arc::clone(&state));
     let listener = tokio::net::TcpListener::bind(&config.node.bind_address).await?;
     info!("Listening on: {}", config.node.bind_address);
