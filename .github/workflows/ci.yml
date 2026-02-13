@@ -121,8 +121,7 @@ jobs:
           name: image
       - name: Load and start container
         run: |
-          docker load --input image.tar
-          IMAGE=$(docker images --quiet | head -1)
+          IMAGE=$(docker load --input image.tar | grep -oP 'sha256:\S+')
           docker run -d --name auth-manager \
             -p 8080:8080 \
             -e TEST_MODE=true \
