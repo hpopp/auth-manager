@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-02-12
+
+### Changed
+
+- Clustering TCP socket port default to 9993.
+- Set Dockerfile uid and gid to 993.
+- Faster startup, cluster elections, and heartbeats.
+
+[#9](https://github.com/hpopp/auth-manager/pull/9)
+
 ## [0.5.0] - 2026-02-11
 
 ### Changed

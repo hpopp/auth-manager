@@ -14,11 +14,11 @@ use crate::AppState;
 /// This checks for heartbeat timeouts and triggers elections.
 pub fn start_election_monitor(state: Arc<AppState>) -> JoinHandle<()> {
     let election_timeout = state.config.cluster.election_timeout_ms;
-    let check_interval = Duration::from_millis(election_timeout / 4);
+    let check_interval = Duration::from_millis(election_timeout / 3);
 
     tokio::spawn(async move {
         // Random startup delay to stagger initial elections across nodes
-        let startup_delay = rand::random::<u64>() % 2000 + 1000; // 1-3 seconds
+        let startup_delay = rand::random::<u64>() % 350 + 150; // 150-500ms
         debug!("Election monitor starting in {}ms", startup_delay);
         tokio::time::sleep(Duration::from_millis(startup_delay)).await;
 

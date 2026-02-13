@@ -90,15 +90,15 @@ fn default_data_dir() -> String {
 }
 
 fn default_cluster_port() -> u16 {
-    8081
+    9993
 }
 
 fn default_heartbeat_interval_ms() -> u64 {
-    1000 // Send heartbeat every 1s
+    300 // Send heartbeat every 300ms (TCP is sub-ms latency)
 }
 
 fn default_election_timeout_ms() -> u64 {
-    10000 // Wait 10s before triggering election
+    3000 // Wait 3s before triggering election (~10x heartbeat interval)
 }
 
 fn default_log_retention_entries() -> u64 {
