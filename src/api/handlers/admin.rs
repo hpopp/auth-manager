@@ -39,7 +39,6 @@ pub struct PeerStatus {
 #[derive(Debug, Serialize)]
 pub struct PurgeResponse {
     pub api_keys_deleted: u64,
-    pub replication_entries_deleted: u64,
     pub sessions_deleted: u64,
 }
 
@@ -62,24 +61,25 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<JSend<HealthResp
 pub async fn cluster_status(
     State(state): State<Arc<AppState>>,
 ) -> Json<JSend<ClusterStatusResponse>> {
-    let cluster = state.cluster.read().await;
+    let info = state.node.cluster_info().await;
+    let cluster_size = info.peers.len() + 1;
 
     JSend::success(ClusterStatusResponse {
-        cluster_size: cluster.cluster_size(),
-        node_id: state.config.node.id.clone(),
-        peers: cluster
-            .peer_states
+        cluster_size,
+        node_id: info.node_id,
+        peers: info
+            .peers
             .iter()
-            .map(|(id, peer)| PeerStatus {
-                id: id.clone(),
-                sequence: peer.sequence,
-                status: peer.status.clone(),
+            .map(|p| PeerStatus {
+                id: p.id.clone(),
+                sequence: p.sequence,
+                status: p.status.clone(),
             })
             .collect(),
-        quorum: cluster.quorum_size(),
-        role: format!("{:?}", cluster.role),
-        sequence: cluster.last_applied_sequence,
-        term: cluster.current_term,
+        quorum: cluster_size / 2 + 1,
+        role: format!("{:?}", info.role),
+        sequence: info.sequence,
+        term: info.term,
     })
 }
 
@@ -91,12 +91,10 @@ pub async fn admin_purge(
             tracing::warn!(
                 sessions = stats.sessions,
                 api_keys = stats.api_keys,
-                replication_entries = stats.replication_entries,
                 "Purged all data"
             );
             Ok(JSend::success(PurgeResponse {
                 api_keys_deleted: stats.api_keys,
-                replication_entries_deleted: stats.replication_entries,
                 sessions_deleted: stats.sessions,
             }))
         }

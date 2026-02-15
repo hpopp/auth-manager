@@ -6,12 +6,6 @@ pub const SESSIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("session
 /// API keys: key_hash -> ApiKey (msgpack)
 pub const API_KEYS: TableDefinition<&str, &[u8]> = TableDefinition::new("api_keys");
 
-/// Replication log: sequence_number -> ReplicatedWrite (msgpack)
-pub const REPLICATION_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("replication_log");
-
-/// Node state: "state" -> NodeState (msgpack)
-pub const NODE_META: TableDefinition<&str, &[u8]> = TableDefinition::new("node_meta");
-
 /// Secondary index: subject_id -> Vec<key_hash> (for listing API keys by subject)
 pub const SUBJECT_API_KEYS: TableDefinition<&str, &[u8]> = TableDefinition::new("subject_api_keys");
 

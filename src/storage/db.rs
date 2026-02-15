@@ -1,5 +1,6 @@
 use redb::{Database as RedbDatabase, ReadTransaction, ReadableTable, WriteTransaction};
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 use super::tables::*;
@@ -63,14 +64,21 @@ impl From<redb::TransactionError> for DatabaseError {
 }
 
 pub struct Database {
-    db: RedbDatabase,
+    db: Arc<RedbDatabase>,
+}
+
+impl Clone for Database {
+    fn clone(&self) -> Self {
+        Self {
+            db: Arc::clone(&self.db),
+        }
+    }
 }
 
 /// Statistics from a purge operation
 #[derive(Debug, Default)]
 pub struct PurgeStats {
     pub api_keys: u64,
-    pub replication_entries: u64,
     pub sessions: u64,
 }
 
@@ -79,16 +87,13 @@ impl Database {
     pub fn open<P: AsRef<Path>>(data_dir: P) -> Result<Self, DatabaseError> {
         std::fs::create_dir_all(data_dir.as_ref())?;
         let db_path = data_dir.as_ref().join("auth-manager.redb");
-        let db = RedbDatabase::create(db_path)?;
+        let db = Arc::new(RedbDatabase::create(db_path)?);
 
-        // Initialize tables
+        // Initialize application tables
         let write_txn = db.begin_write()?;
         {
-            // Create tables if they don't exist
             let _ = write_txn.open_table(API_KEY_IDS)?;
             let _ = write_txn.open_table(API_KEYS)?;
-            let _ = write_txn.open_table(NODE_META)?;
-            let _ = write_txn.open_table(REPLICATION_LOG)?;
             let _ = write_txn.open_table(SESSION_IDS)?;
             let _ = write_txn.open_table(SESSIONS)?;
             let _ = write_txn.open_table(SUBJECT_API_KEYS)?;
@@ -97,6 +102,11 @@ impl Database {
         write_txn.commit()?;
 
         Ok(Self { db })
+    }
+
+    /// Get a reference to the underlying redb database (for sharing with muster).
+    pub fn inner(&self) -> Arc<RedbDatabase> {
+        Arc::clone(&self.db)
     }
 
     /// Begin a read transaction
@@ -146,22 +156,6 @@ impl Database {
             for key in keys {
                 table.remove(key.as_str())?;
                 stats.api_keys += 1;
-            }
-        }
-
-        // Clear replication log
-        {
-            let table = write_txn.open_table(REPLICATION_LOG)?;
-            let keys: Vec<u64> = table
-                .iter()?
-                .map(|r| r.map(|(k, _)| k.value()))
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(table);
-
-            let mut table = write_txn.open_table(REPLICATION_LOG)?;
-            for key in keys {
-                table.remove(key)?;
-                stats.replication_entries += 1;
             }
         }
 

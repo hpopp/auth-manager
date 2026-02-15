@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use super::{replication_error, ListParams};
 use crate::api::response::{ApiError, AppJson, AppQuery, JSend, JSendPaginated, Pagination};
-use crate::cluster::replicate_write;
 use crate::device::parse_user_agent;
 use crate::storage::models::{SessionToken, WriteOp};
 use crate::tokens::{generator::generate_hex, session};
@@ -98,14 +97,11 @@ pub async fn create_session(
     };
 
     let operation = WriteOp::CreateSession(session.clone());
-    replicate_write(Arc::clone(&state), operation)
+    state
+        .node
+        .replicate(operation)
         .await
         .map_err(replication_error)?;
-
-    state
-        .db
-        .put_session(&session)
-        .map_err(|e| ApiError::internal(format!("Failed to store session: {e}")))?;
 
     tracing::debug!(id = %session.id, subject_id = %req.subject_id, "Created session token");
 
@@ -164,14 +160,11 @@ pub async fn revoke_session(
     let operation = WriteOp::RevokeSession {
         token_id: token.clone(),
     };
-    replicate_write(Arc::clone(&state), operation)
+    state
+        .node
+        .replicate(operation)
         .await
         .map_err(replication_error)?;
-
-    state
-        .db
-        .delete_session(&token)
-        .map_err(|e| ApiError::internal(format!("Failed to delete session: {e}")))?;
 
     tracing::debug!(id = %id, "Revoked session token");
     Ok(JSend::success(()))
