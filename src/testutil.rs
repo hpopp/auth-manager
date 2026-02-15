@@ -37,8 +37,7 @@ pub fn test_config() -> Config {
 
 /// Build a full `Arc<AppState>` around the given database.
 ///
-/// Uses [`test_config`] and a `reqwest::Client` with proxy disabled
-/// (avoids macOS system-configuration panics in sandboxed tests).
+/// Uses [`test_config`] and a single-node `MusterNode` (no peers, no discovery).
 pub fn test_state(db: Database) -> Arc<AppState> {
     let config = test_config();
     let muster_config = muster::Config {
