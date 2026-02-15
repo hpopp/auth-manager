@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use [muster](https://github.com/hpopp/muster) crate for multinode clustering.
 
+### Removed
+
+- Dropped support for TOML file configuration. Not useful as you should be running
+  in containerized environments with ENV variables.
+
+[#10](https://github.com/hpopp/auth-manager/pull/10)
+
 ## [0.5.1] - 2026-02-12
 
 ### Changed
