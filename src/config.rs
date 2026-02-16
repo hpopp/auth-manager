@@ -29,26 +29,15 @@ pub struct ClusterConfig {
     pub discovery: DiscoveryConfig,
     pub election_timeout_ms: u64,
     pub heartbeat_interval_ms: u64,
-    pub log_retention_days: u64,
-    pub log_retention_entries: u64,
     pub peers: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DiscoveryConfig {
-    /// DNS name to resolve for peer discovery (required for dns strategy)
+    /// DNS name to resolve for peer discovery (e.g., a Kubernetes headless service).
     pub dns_name: Option<String>,
     /// How often to poll for peer changes (seconds)
     pub poll_interval_seconds: u64,
-    /// Discovery strategy: "dns" or "static"
-    pub strategy: DiscoveryStrategy,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub enum DiscoveryStrategy {
-    Dns,
-    #[default]
-    Static,
 }
 
 #[derive(Debug, Clone)]
@@ -71,7 +60,6 @@ impl Default for DiscoveryConfig {
         Self {
             dns_name: None,
             poll_interval_seconds: 5,
-            strategy: DiscoveryStrategy::Static,
         }
     }
 }
@@ -83,8 +71,6 @@ impl Default for ClusterConfig {
             discovery: DiscoveryConfig::default(),
             election_timeout_ms: 3000,
             heartbeat_interval_ms: 300,
-            log_retention_days: 7,
-            log_retention_entries: 100_000,
             peers: Vec::new(),
         }
     }
@@ -111,17 +97,6 @@ impl Config {
             .unwrap_or_default();
 
         let dns_name = std::env::var("DISCOVERY_DNS_NAME").ok();
-        let discovery_strategy = if dns_name.is_some() {
-            DiscoveryStrategy::Dns
-        } else {
-            std::env::var("DISCOVERY_STRATEGY")
-                .ok()
-                .map(|s| match s.to_lowercase().as_str() {
-                    "dns" => DiscoveryStrategy::Dns,
-                    _ => DiscoveryStrategy::Static,
-                })
-                .unwrap_or(DiscoveryStrategy::Static)
-        };
         let poll_interval = std::env::var("DISCOVERY_POLL_INTERVAL")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -146,7 +121,6 @@ impl Config {
                 cluster_port,
                 peers,
                 discovery: DiscoveryConfig {
-                    strategy: discovery_strategy,
                     dns_name,
                     poll_interval_seconds: poll_interval,
                 },

@@ -51,7 +51,7 @@ export default function (data) {
     directLatency.add(directRes.timings.duration);
   }
 
-  // Write to follower (forwarded to leader via middleware)
+  // Write to follower (transparently forwarded to leader via muster TCP)
   const forwardedRes = http.post(
     `${follower}/sessions`,
     JSON.stringify({
