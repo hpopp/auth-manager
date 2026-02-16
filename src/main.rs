@@ -2,10 +2,9 @@ use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use auth_manager::config::DiscoveryStrategy;
-use auth_manager::{api, cluster, config::Config, expiration, storage::Database, AppState};
-use cluster::discovery::{Discovery, DnsPoll, StaticList};
-use tokio::sync::RwLock;
+use auth_manager::{
+    api, config::Config, expiration, state_machine::AuthStateMachine, storage::Database, AppState,
+};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -50,45 +49,56 @@ async fn main() -> anyhow::Result<()> {
     let db = Database::open(&config.node.data_dir)?;
     info!("Database opened at: {}", config.node.data_dir);
 
-    // Build discovery strategy
-    let discovery = build_discovery(&config);
+    // Build muster configuration from auth-manager config.
+    // Peer addresses are rewritten from HTTP port to cluster TCP port since
+    // muster operates entirely in cluster-TCP land.
+    let cluster_port = config.cluster.cluster_port;
+    let cluster_peers: Vec<String> = config
+        .cluster
+        .peers
+        .iter()
+        .map(|peer| {
+            if let Some((host, _)) = peer.rsplit_once(':') {
+                format!("{host}:{cluster_port}")
+            } else {
+                format!("{peer}:{cluster_port}")
+            }
+        })
+        .collect();
 
-    // Initialize cluster state
-    let cluster_state = cluster::ClusterState::new(&config, &db)?;
+    let muster_config = muster::Config {
+        node_id: config.node.id.clone(),
+        cluster_port,
+        heartbeat_interval_ms: config.cluster.heartbeat_interval_ms,
+        election_timeout_ms: config.cluster.election_timeout_ms,
+        discovery: muster::DiscoveryConfig {
+            dns_name: config.cluster.discovery.dns_name.clone(),
+            peers: cluster_peers,
+            poll_interval_secs: config.cluster.discovery.poll_interval_seconds,
+        },
+    };
 
-    // Create TCP transport for inter-node cluster communication
-    let transport = cluster::ClusterTransport::new(config.cluster.cluster_port);
+    // Create muster storage (shares the redb instance with auth-manager)
+    let muster_storage = muster::RedbStorage::new(db.inner())?;
 
-    // Create shared HTTP client for leader-forwarding (write proxying)
-    let http_client = reqwest::Client::builder()
-        .pool_idle_timeout(std::time::Duration::from_secs(30))
-        .pool_max_idle_per_host(2)
-        .timeout(std::time::Duration::from_secs(5))
-        .build()?;
+    // Create the state machine
+    let state_machine = AuthStateMachine::new(db.clone());
+
+    // Create the cluster node
+    let node = muster::MusterNode::new(muster_config, muster_storage, state_machine)?;
+
+    // Start cluster background tasks (heartbeat, election, discovery, TCP server)
+    let cluster_handles = node.start();
 
     // Create shared state
     let state = Arc::new(AppState {
-        cluster: RwLock::new(cluster_state),
         config: config.clone(),
         db,
-        http_client,
-        replication_lock: tokio::sync::Mutex::new(()),
-        sync_in_progress: std::sync::atomic::AtomicBool::new(false),
-        transport,
+        node: Arc::clone(&node),
     });
 
     // Start background tasks
     let expiration_handle = expiration::start_expiration_cleaner(Arc::clone(&state));
-
-    // Start TCP cluster server and cluster tasks if in cluster mode
-    let (cluster_server_handle, cluster_handle) = if !config.is_single_node() {
-        let server_handle = cluster::server::start_cluster_server(Arc::clone(&state));
-        let tasks_handle = cluster::start_cluster_tasks(Arc::clone(&state), discovery);
-        (Some(server_handle), Some(tasks_handle))
-    } else {
-        info!("Running in single-node mode (no peers configured)");
-        (None, None)
-    };
 
     // Build and start the HTTP server — bind before initial discovery
     // so health probes can respond immediately
@@ -103,19 +113,13 @@ async fn main() -> anyhow::Result<()> {
     // Cleanup: abort background tasks
     info!("Shutting down background tasks");
     expiration_handle.abort();
-    if let Some(handle) = cluster_server_handle {
-        handle.abort();
-    }
-    if let Some(handle) = cluster_handle {
+    for handle in cluster_handles {
         handle.abort();
     }
 
     // Persist cluster state to disk
-    {
-        let cluster = state.cluster.read().await;
-        if let Err(e) = cluster.persist(&state.db, &config.node.id) {
-            tracing::error!(error = %e, "Failed to persist cluster state during shutdown");
-        }
+    if let Err(e) = node.persist_state().await {
+        tracing::error!(error = %e, "Failed to persist cluster state during shutdown");
     }
 
     info!("Shutdown complete");
@@ -146,39 +150,4 @@ async fn shutdown_signal() {
     }
 
     info!("Shutdown signal received, draining connections");
-}
-
-/// Build the appropriate discovery strategy from configuration
-fn build_discovery(config: &Config) -> Option<Discovery> {
-    if config.is_single_node() {
-        return None;
-    }
-
-    match config.cluster.discovery.strategy {
-        DiscoveryStrategy::Dns => {
-            let dns_name = config
-                .cluster
-                .discovery
-                .dns_name
-                .clone()
-                .expect("dns_name is required when discovery strategy is 'dns'");
-            let port = config
-                .node
-                .bind_address
-                .rsplit(':')
-                .next()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(8080u16);
-            Some(Discovery::Dns(DnsPoll::new(dns_name, port)))
-        }
-        DiscoveryStrategy::Static => {
-            if config.cluster.peers.is_empty() {
-                None
-            } else {
-                Some(Discovery::Static(StaticList::new(
-                    config.cluster.peers.clone(),
-                )))
-            }
-        }
-    }
 }

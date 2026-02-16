@@ -1,14 +1,12 @@
 //! Shared test helpers — available to all `#[cfg(test)]` modules in the crate.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use chrono::Utc;
 use tempfile::TempDir;
-use tokio::sync::RwLock;
 
-use crate::cluster::ClusterState;
 use crate::config::{ClusterConfig, Config, NodeConfig, TokenConfig};
+use crate::state_machine::AuthStateMachine;
 use crate::storage::models::{ApiKey, DeviceInfo, SessionToken};
 use crate::storage::Database;
 use crate::AppState;
@@ -39,22 +37,21 @@ pub fn test_config() -> Config {
 
 /// Build a full `Arc<AppState>` around the given database.
 ///
-/// Uses [`test_config`] and a `reqwest::Client` with proxy disabled
-/// (avoids macOS system-configuration panics in sandboxed tests).
+/// Uses [`test_config`] and a single-node `MusterNode` (no peers, no discovery).
 pub fn test_state(db: Database) -> Arc<AppState> {
     let config = test_config();
-    let cluster_state = ClusterState::new(&config, &db).unwrap();
-    let http_client = reqwest::Client::builder().no_proxy().build().unwrap();
-    let transport = crate::cluster::ClusterTransport::new(config.cluster.cluster_port);
-    Arc::new(AppState {
-        cluster: RwLock::new(cluster_state),
-        config,
-        db,
-        http_client,
-        replication_lock: tokio::sync::Mutex::new(()),
-        sync_in_progress: AtomicBool::new(false),
-        transport,
-    })
+    let muster_config = muster::Config {
+        node_id: config.node.id.clone(),
+        cluster_port: config.cluster.cluster_port,
+        heartbeat_interval_ms: config.cluster.heartbeat_interval_ms,
+        election_timeout_ms: config.cluster.election_timeout_ms,
+        discovery: muster::DiscoveryConfig::default(),
+    };
+    let muster_storage = muster::RedbStorage::new(db.inner()).unwrap();
+    let state_machine = AuthStateMachine::new(db.clone());
+    let node = muster::MusterNode::new(muster_config, muster_storage, state_machine).unwrap();
+
+    Arc::new(AppState { config, db, node })
 }
 
 /// Create a `SessionToken` with the given id and subject.

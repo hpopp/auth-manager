@@ -1,5 +1,4 @@
 mod handlers;
-mod middleware;
 pub mod response;
 mod routes;
 

@@ -92,17 +92,6 @@ impl ApiKey {
     }
 }
 
-/// A write operation for replication
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReplicatedWrite {
-    /// The operation being replicated
-    pub operation: WriteOp,
-    /// Monotonic, gapless sequence number
-    pub sequence: u64,
-    /// When the write occurred
-    pub timestamp: DateTime<Utc>,
-}
-
 /// Types of write operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WriteOp {
@@ -120,24 +109,4 @@ pub enum WriteOp {
         name: Option<String>,
         scopes: Option<Vec<String>>,
     },
-}
-
-/// Persistent node state (stored in redb)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeState {
-    pub current_term: u64,
-    pub last_applied_sequence: u64,
-    pub node_id: String,
-    pub voted_for: Option<String>,
-}
-
-impl NodeState {
-    pub fn new(node_id: String) -> Self {
-        Self {
-            node_id,
-            current_term: 0,
-            voted_for: None,
-            last_applied_sequence: 0,
-        }
-    }
 }

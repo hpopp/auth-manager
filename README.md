@@ -1,5 +1,5 @@
 [![CI](https://github.com/hpopp/auth-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/hpopp/auth-manager/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.5.1-orange.svg)](https://github.com/hpopp/auth-manager/commits/main)
+[![Version](https://img.shields.io/badge/version-0.6.0-orange.svg)](https://github.com/hpopp/auth-manager/commits/main)
 [![Last Updated](https://img.shields.io/github/last-commit/hpopp/auth-manager.svg)](https://github.com/hpopp/auth-manager/commits/main)
 
 # Auth Manager
@@ -47,17 +47,18 @@ This project uses `cargo fmt` for formatting.
 
 Deployments require the following environment variables to be set in containers:
 
-| Key                       | Description                                        | Required? | Default             |
-| ------------------------- | -------------------------------------------------- | --------- | ------------------- |
-| `BIND_ADDRESS`            | HTTP server bind address.                          |           | `0.0.0.0:8080`      |
-| `DATA_DIR`                | Data directory for embedded database.              |           | `./data`            |
-| `DISCOVERY_DNS_NAME`      | DNS name for peer discovery. Enables DNS strategy. |           |                     |
-| `DISCOVERY_POLL_INTERVAL` | Discovery poll interval in seconds.                |           | `5`                 |
-| `LOG_FORMAT`              | Log output format: `gcp`, `json`, or `text`.       |           | `text`              |
-| `NODE_ID`                 | Unique node identifier.                            |           | Random UUID         |
-| `PEERS`                   | Comma-separated static peer addresses.             |           |                     |
-| `RUST_LOG`                | Log level filter.                                  |           | `auth_manager=info` |
-| `TEST_MODE`               | Enables dangerous operations like purge.           |           | `false`             |
+| Key                       | Description                                        | Default        |
+| ------------------------- | -------------------------------------------------- | -------------- |
+| `BIND_ADDRESS`            | HTTP server bind address.                          | `0.0.0.0:8080` |
+| `CLUSTER_PORT`            | TCP port for inter-node cluster communication.     | `9993`         |
+| `DATA_DIR`                | Data directory for embedded database.              | `./data`       |
+| `DISCOVERY_DNS_NAME`      | DNS name for peer discovery. Enables DNS strategy. |                |
+| `DISCOVERY_POLL_INTERVAL` | Discovery poll interval in seconds.                | `5`            |
+| `LOG_FORMAT`              | Log output format: `gcp`, `json`, or `text`.       | `text`         |
+| `NODE_ID`                 | Unique node identifier.                            | Random UUID    |
+| `PEERS`                   | Comma-separated static peer addresses.             |                |
+| `RUST_LOG`                | Log level filter.                                  | `info`         |
+| `TEST_MODE`               | Enables dangerous operations like purge.           | `false`        |
 
 ### Liveness
 

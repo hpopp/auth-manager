@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-15
+
+### Changed
+
+- Use [muster](https://github.com/hpopp/muster) crate for multinode clustering.
+
+### Removed
+
+- Dropped support for TOML file configuration. Not useful as you should be running
+  in containerized environments with ENV variables.
+
+[#10](https://github.com/hpopp/auth-manager/pull/10)
+
 ## [0.5.1] - 2026-02-12
 
 ### Changed

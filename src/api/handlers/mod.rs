@@ -5,7 +5,6 @@ mod sessions;
 use serde::Deserialize;
 
 use crate::api::response::ApiError;
-use crate::cluster::ReplicationError;
 
 /// Query parameters for list endpoints
 #[derive(Debug, Deserialize)]
@@ -36,13 +35,13 @@ pub use api_keys::{
 };
 pub use sessions::{create_session, get_session, list_sessions, revoke_session, validate_session};
 
-/// Map a ReplicationError to an ApiError
-fn replication_error(e: ReplicationError) -> ApiError {
+/// Map a MusterError to an ApiError
+fn replication_error(e: muster::MusterError) -> ApiError {
     match e {
-        ReplicationError::NotLeader => {
-            ApiError::unavailable("Not the leader. Forward request to leader.")
+        muster::MusterError::NotLeader { .. } => {
+            ApiError::unavailable("No leader available — retry shortly")
         }
-        ReplicationError::NoQuorum => {
+        muster::MusterError::NoQuorum => {
             ApiError::unavailable("Failed to reach quorum for replication")
         }
         _ => ApiError::internal(e.to_string()),

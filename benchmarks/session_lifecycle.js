@@ -65,6 +65,7 @@ export default function (data) {
   // List sessions for this subject
   const listRes = http.get(
     `${leader}/sessions?subject_id=bench-user-${__VU}`,
+    { tags: { name: "GET /sessions" } },
   );
 
   check(listRes, {
@@ -73,7 +74,9 @@ export default function (data) {
   });
 
   // Revoke the session
-  const revokeRes = http.del(`${leader}/sessions/${id}`);
+  const revokeRes = http.del(`${leader}/sessions/${id}`, null, {
+    tags: { name: "DELETE /sessions/:id" },
+  });
 
   check(revokeRes, {
     "revoke: status 200": (r) => r.status === 200,

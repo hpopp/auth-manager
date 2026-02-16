@@ -66,6 +66,7 @@ export default function (data) {
   // List API keys for this subject
   const listRes = http.get(
     `${leader}/api-keys?subject_id=bench-user-${__VU}`,
+    { tags: { name: "GET /api-keys" } },
   );
 
   check(listRes, {
@@ -81,7 +82,7 @@ export default function (data) {
       description: "Updated by benchmark",
       scopes: ["read", "write", "admin"],
     }),
-    jsonHeaders,
+    { ...jsonHeaders, tags: { name: "PUT /api-keys/:id" } },
   );
 
   check(updateRes, {
@@ -89,7 +90,9 @@ export default function (data) {
   });
 
   // Revoke the API key
-  const revokeRes = http.del(`${leader}/api-keys/${id}`);
+  const revokeRes = http.del(`${leader}/api-keys/${id}`, null, {
+    tags: { name: "DELETE /api-keys/:id" },
+  });
 
   check(revokeRes, {
     "revoke: status 200": (r) => r.status === 200,

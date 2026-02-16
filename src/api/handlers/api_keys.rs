@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use super::{replication_error, ListParams};
 use crate::api::response::{ApiError, AppJson, AppQuery, JSend, JSendPaginated, Pagination};
-use crate::cluster::replicate_write;
 use crate::storage::models::{ApiKey as ApiKeyModel, WriteOp};
 use crate::tokens::{
     api_key,
@@ -113,14 +112,11 @@ pub async fn create_api_key(
     };
 
     let operation = WriteOp::CreateApiKey(api_key_record.clone());
-    replicate_write(Arc::clone(&state), operation)
+    state
+        .node
+        .replicate(operation)
         .await
         .map_err(replication_error)?;
-
-    state
-        .db
-        .put_api_key(&api_key_record)
-        .map_err(|e| ApiError::internal(format!("Failed to store API key: {e}")))?;
 
     tracing::debug!(key_id = %api_key_record.id, name = %req.name, "Created API key");
 
@@ -154,19 +150,11 @@ pub async fn update_api_key(
         name: req.name.clone(),
         scopes: req.scopes.clone(),
     };
-    replicate_write(Arc::clone(&state), operation)
+    state
+        .node
+        .replicate(operation)
         .await
         .map_err(replication_error)?;
-
-    state
-        .db
-        .update_api_key(
-            &key_hash,
-            req.name.as_deref(),
-            req.description.as_ref().map(|d| d.as_deref()),
-            req.scopes.as_deref(),
-        )
-        .map_err(|e| ApiError::internal(format!("Failed to update API key: {e}")))?;
 
     let api_key_record = state
         .db
@@ -228,14 +216,11 @@ pub async fn revoke_api_key(
     let operation = WriteOp::RevokeApiKey {
         key_id: key_hash.clone(),
     };
-    replicate_write(Arc::clone(&state), operation)
+    state
+        .node
+        .replicate(operation)
         .await
         .map_err(replication_error)?;
-
-    state
-        .db
-        .delete_api_key(&key_hash)
-        .map_err(|e| ApiError::internal(format!("Failed to delete API key: {e}")))?;
 
     tracing::debug!(id = %id, "Revoked API key");
     Ok(JSend::success(()))
