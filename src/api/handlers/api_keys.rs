@@ -1,12 +1,13 @@
 use axum::extract::{Path, State};
 use axum::Json;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::Arc;
 
 use super::{replication_error, ListParams};
 use crate::api::response::{ApiError, AppJson, AppQuery, JSend, JSendPaginated, Pagination};
-use crate::storage::models::{ApiKey as ApiKeyModel, WriteOp};
+use crate::storage::models::{ApiKey as ApiKeyModel, Patch, WriteOp};
 use crate::tokens::{
     api_key,
     generator::{generate_hex, hash_key},
@@ -58,12 +59,25 @@ pub struct ApiKeyResponse {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateApiKeyRequest {
-    #[serde(default)]
-    pub description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    pub description: Patch<String>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub scopes: Option<Vec<String>>,
+}
+
+/// Deserialize a JSON field into `Patch<T>`:
+/// missing -> Patch::Absent (via #[serde(default)]), null -> Patch::Null, value -> Patch::Value.
+fn deserialize_patch<'de, T, D>(deserializer: D) -> Result<Patch<T>, D::Error>
+where
+    T: DeserializeOwned,
+    D: Deserializer<'de>,
+{
+    match Option::<T>::deserialize(deserializer)? {
+        None => Ok(Patch::Null),
+        Some(v) => Ok(Patch::Value(v)),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,6 +164,7 @@ pub async fn update_api_key(
         name: req.name.clone(),
         scopes: req.scopes.clone(),
     };
+
     state
         .node
         .replicate(operation)
@@ -271,7 +286,7 @@ fn validate_create_api_key(req: &CreateApiKeyRequest) -> Result<(), ApiError> {
 }
 
 fn validate_update_api_key(req: &UpdateApiKeyRequest) -> Result<(), ApiError> {
-    if req.name.is_none() && req.description.is_none() && req.scopes.is_none() {
+    if req.name.is_none() && req.description.is_absent() && req.scopes.is_none() {
         return Err(ApiError::bad_request(
             "at least one field (name, description, scopes) must be provided",
         ));

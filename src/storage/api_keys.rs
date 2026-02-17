@@ -50,7 +50,7 @@ impl Database {
                     if hashes.is_empty() {
                         index_table.remove(subject_id.as_str())?;
                     } else {
-                        let new_index_data = rmp_serde::to_vec(&hashes)?;
+                        let new_index_data = rmp_serde::to_vec_named(&hashes)?;
                         index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
@@ -117,7 +117,7 @@ impl Database {
                 if hashes.is_empty() {
                     index_table.remove(subject_id.as_str())?;
                 } else {
-                    let new_index_data = rmp_serde::to_vec(&hashes)?;
+                    let new_index_data = rmp_serde::to_vec_named(&hashes)?;
                     index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
                 }
             }
@@ -218,7 +218,7 @@ impl Database {
         let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(API_KEYS)?;
-            let data = rmp_serde::to_vec(api_key)?;
+            let data = rmp_serde::to_vec_named(api_key)?;
             table.insert(api_key.key_hash.as_str(), data.as_slice())?;
 
             // Update resource_api_keys index
@@ -230,7 +230,7 @@ impl Database {
 
             if !key_hashes.contains(&api_key.key_hash) {
                 key_hashes.push(api_key.key_hash.clone());
-                let index_data = rmp_serde::to_vec(&key_hashes)?;
+                let index_data = rmp_serde::to_vec_named(&key_hashes)?;
                 index_table.insert(api_key.subject_id.as_str(), index_data.as_slice())?;
             }
 
@@ -255,7 +255,7 @@ impl Database {
         };
         if let Some(mut api_key) = existing {
             api_key.last_used_at = Some(chrono::Utc::now());
-            let serialized = rmp_serde::to_vec(&api_key)?;
+            let serialized = rmp_serde::to_vec_named(&api_key)?;
             let mut table = write_txn.open_table(API_KEYS)?;
             table.insert(key_hash, serialized.as_slice())?;
         }
@@ -299,7 +299,7 @@ impl Database {
                 }
                 api_key.updated_at = Some(chrono::Utc::now());
 
-                let serialized = rmp_serde::to_vec(&api_key)?;
+                let serialized = rmp_serde::to_vec_named(&api_key)?;
                 let mut table = write_txn.open_table(API_KEYS)?;
                 table.insert(key_hash, serialized.as_slice())?;
                 true

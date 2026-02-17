@@ -101,6 +101,20 @@ jsonpath "$.data.description" == "Updated description"
 jsonpath "$.data.scopes" count == 3
 
 
+# Clear description (set to null)
+PUT http://{{host}}:{{port}}/api-keys/{{api_key_id}}
+Content-Type: application/json
+{
+  "description": null
+}
+HTTP 200
+[Asserts]
+jsonpath "$.status" == "success"
+jsonpath "$.data.name" == "Updated Key"
+jsonpath "$.data.description" == null
+jsonpath "$.data.scopes" count == 3
+
+
 # Validate API key
 POST http://{{host}}:{{port}}/api-keys/verify
 Content-Type: application/json

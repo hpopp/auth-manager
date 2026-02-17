@@ -21,7 +21,7 @@ impl Database {
         let write_txn = self.begin_write()?;
         {
             let mut table = write_txn.open_table(SESSIONS)?;
-            let data = rmp_serde::to_vec(session)?;
+            let data = rmp_serde::to_vec_named(session)?;
             table.insert(session.token.as_str(), data.as_slice())?;
 
             // Update resource_sessions index (keyed by token)
@@ -33,7 +33,7 @@ impl Database {
 
             if !tokens.contains(&session.token) {
                 tokens.push(session.token.clone());
-                let index_data = rmp_serde::to_vec(&tokens)?;
+                let index_data = rmp_serde::to_vec_named(&tokens)?;
                 index_table.insert(session.subject_id.as_str(), index_data.as_slice())?;
             }
 
@@ -100,7 +100,7 @@ impl Database {
                     if t.is_empty() {
                         index_table.remove(subject_id.as_str())?;
                     } else {
-                        let new_index_data = rmp_serde::to_vec(&t)?;
+                        let new_index_data = rmp_serde::to_vec_named(&t)?;
                         index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
@@ -168,7 +168,7 @@ impl Database {
                 if t.is_empty() {
                     index_table.remove(subject_id.as_str())?;
                 } else {
-                    let new_index_data = rmp_serde::to_vec(&t)?;
+                    let new_index_data = rmp_serde::to_vec_named(&t)?;
                     index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
                 }
             }
@@ -256,7 +256,7 @@ impl Database {
         };
         if let Some(mut session) = existing {
             session.last_used_at = Some(chrono::Utc::now());
-            let serialized = rmp_serde::to_vec(&session)?;
+            let serialized = rmp_serde::to_vec_named(&session)?;
             let mut table = write_txn.open_table(SESSIONS)?;
             table.insert(token, serialized.as_slice())?;
         }

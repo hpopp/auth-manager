@@ -2,6 +2,34 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Three-state patch value for partial updates that survives serialization round-trips.
+/// Unlike `Option<Option<T>>`, each variant has a distinct wire representation.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum Patch<T> {
+    /// Field was not included in the request (no change).
+    #[default]
+    Absent,
+    /// Field was explicitly set to null (clear it).
+    Null,
+    /// Field was set to a new value.
+    Value(T),
+}
+
+impl<T> Patch<T> {
+    /// Convert to the `Option<Option<&T>>` form that storage operations expect.
+    pub fn as_option(&self) -> Option<Option<&T>> {
+        match self {
+            Patch::Absent => None,
+            Patch::Null => Some(None),
+            Patch::Value(v) => Some(Some(v)),
+        }
+    }
+
+    pub fn is_absent(&self) -> bool {
+        matches!(self, Patch::Absent)
+    }
+}
+
 /// Device kind detected from User-Agent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DeviceKind {
@@ -105,7 +133,8 @@ pub enum WriteOp {
     },
     UpdateApiKey {
         key_hash: String,
-        description: Option<Option<String>>,
+        #[serde(default)]
+        description: Patch<String>,
         name: Option<String>,
         scopes: Option<Vec<String>>,
     },
