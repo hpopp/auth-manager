@@ -50,7 +50,7 @@ impl muster::StateMachine for AuthStateMachine {
                 self.db.update_api_key(
                     key_hash,
                     name.as_deref(),
-                    description.as_ref().map(|d| d.as_deref()),
+                    description.as_option().map(|o| o.map(String::as_str)),
                     scopes.as_deref(),
                 )?;
             }

@@ -89,7 +89,9 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          tags: hpopp/auth-manager:${{ steps.version.outputs.version }}
+          tags: |
+            hpopp/auth-manager:${{ steps.version.outputs.version }}
+            hpopp/auth-manager:latest
           outputs: type=docker,dest=/tmp/image.tar
           build-args: |
             CREATED=${{ steps.timestamp.outputs.timestamp }}
