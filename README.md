@@ -1,10 +1,10 @@
-[![CI](https://github.com/hpopp/auth-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/hpopp/auth-manager/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.6.0-orange.svg)](https://github.com/hpopp/auth-manager/commits/main)
-[![Last Updated](https://img.shields.io/github/last-commit/hpopp/auth-manager.svg)](https://github.com/hpopp/auth-manager/commits/main)
-
 # Auth Manager
 
-A lightweight, clusterable authentication and API key management service.
+> A lightweight, clusterable authentication and API key management service.
+
+[![CI](https://github.com/hpopp/auth-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/hpopp/auth-manager/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/hpopp/auth-manager)](https://github.com/hpopp/auth-manager/releases)
+[![Last Updated](https://img.shields.io/github/last-commit/hpopp/auth-manager.svg)](https://github.com/hpopp/auth-manager/commits/main)
 
 ## Project Dependencies
 
