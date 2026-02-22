@@ -1,6 +1,6 @@
 [package]
 name = "auth-manager"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 description = "A tiny, fault-tolerant distributed token management service"
 license = "MIT"
@@ -8,6 +8,7 @@ license = "MIT"
 [lib]
 name = "auth_manager"
 path = "src/lib.rs"
+doctest = false
 
 [[bin]]
 name = "auth-manager"
@@ -18,7 +19,7 @@ anyhow = "1"
 axum = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 hex = "0.4"
-muster = { git = "https://github.com/hpopp/muster.git", tag = "v0.1.0" }
+muster = { git = "https://github.com/hpopp/muster.git", tag = "v0.2.0" }
 rand = "0.8"
 redb = "2"
 rmp-serde = "1.3.1"

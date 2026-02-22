@@ -5,7 +5,7 @@ import { discoverCluster, jsonHeaders } from "./helpers.js";
 
 const validationsPerformed = new Counter("validations_performed");
 
-const SEED_COUNT = 200;
+const SEED_COUNT = __ENV.SEED_COUNT ? parseInt(__ENV.SEED_COUNT) : 1000;
 
 export const options = {
   scenarios: {

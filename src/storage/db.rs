@@ -98,6 +98,8 @@ impl Database {
             let _ = write_txn.open_table(SESSIONS)?;
             let _ = write_txn.open_table(SUBJECT_API_KEYS)?;
             let _ = write_txn.open_table(SUBJECT_SESSIONS)?;
+            let _ = write_txn.open_table(SESSION_EXPIRY)?;
+            let _ = write_txn.open_table(API_KEY_EXPIRY)?;
         }
         write_txn.commit()?;
 
@@ -220,7 +222,46 @@ impl Database {
             }
         }
 
+        // Clear expiration indexes
+        {
+            let table = write_txn.open_table(SESSION_EXPIRY)?;
+            let keys: Vec<String> = table
+                .iter()?
+                .map(|r| r.map(|(k, _)| k.value().to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(table);
+
+            let mut table = write_txn.open_table(SESSION_EXPIRY)?;
+            for key in keys {
+                table.remove(key.as_str())?;
+            }
+        }
+        {
+            let table = write_txn.open_table(API_KEY_EXPIRY)?;
+            let keys: Vec<String> = table
+                .iter()?
+                .map(|r| r.map(|(k, _)| k.value().to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(table);
+
+            let mut table = write_txn.open_table(API_KEY_EXPIRY)?;
+            for key in keys {
+                table.remove(key.as_str())?;
+            }
+        }
+
         write_txn.commit()?;
         Ok(stats)
     }
+}
+
+/// Build an expiration index key: zero-padded millisecond timestamp + identifier.
+/// The zero-padding ensures lexicographic ordering matches chronological ordering.
+pub fn expiry_key(expires_at: &chrono::DateTime<chrono::Utc>, id: &str) -> String {
+    format!("{:020}:{}", expires_at.timestamp_millis(), id)
+}
+
+/// Extract the millisecond timestamp prefix from an expiry key.
+pub fn expiry_key_ms(key: &str) -> Option<i64> {
+    key.split_once(':').and_then(|(ts, _)| ts.parse().ok())
 }
