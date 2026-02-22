@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Properly propagate deserialization errors in subject_sessions index instead of silently falling back to default.
 
+[#12](https://github.com/hpopp/auth-manager/pull/12)
+
 ## [0.7.0] - 2026-02-16
 
 ### Fixed
