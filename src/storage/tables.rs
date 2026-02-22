@@ -17,3 +17,9 @@ pub const SESSION_IDS: TableDefinition<&str, &str> = TableDefinition::new("sessi
 
 /// Secondary index: API key UUID id -> key_hash (for revoking API keys by ID)
 pub const API_KEY_IDS: TableDefinition<&str, &str> = TableDefinition::new("api_key_ids");
+
+/// Expiration index: "{expires_at_ms}:{token}" -> "" (sorted by expiry time)
+pub const SESSION_EXPIRY: TableDefinition<&str, &str> = TableDefinition::new("session_expiry");
+
+/// Expiration index: "{expires_at_ms}:{key_hash}" -> "" (sorted by expiry time)
+pub const API_KEY_EXPIRY: TableDefinition<&str, &str> = TableDefinition::new("api_key_expiry");

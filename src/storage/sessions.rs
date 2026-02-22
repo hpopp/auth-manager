@@ -1,6 +1,6 @@
 use redb::ReadableTable;
 
-use super::db::{Database, DatabaseError};
+use super::db::{expiry_key, Database, DatabaseError};
 use super::models::SessionToken;
 use super::tables::*;
 
@@ -28,7 +28,8 @@ impl Database {
             let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
             let mut tokens: Vec<String> = index_table
                 .get(session.subject_id.as_str())?
-                .map(|v| rmp_serde::from_slice(v.value()).unwrap_or_default())
+                .map(|v| rmp_serde::from_slice(v.value()))
+                .transpose()?
                 .unwrap_or_default();
 
             if !tokens.contains(&session.token) {
@@ -40,6 +41,11 @@ impl Database {
             // Update session ID index (UUID -> token)
             let mut id_table = write_txn.open_table(SESSION_IDS)?;
             id_table.insert(session.id.as_str(), session.token.as_str())?;
+
+            // Update expiration index
+            let mut expiry_table = write_txn.open_table(SESSION_EXPIRY)?;
+            let ek = expiry_key(&session.expires_at, &session.token);
+            expiry_table.insert(ek.as_str(), session.token.as_str())?;
         }
         write_txn.commit()?;
         Ok(())
@@ -64,30 +70,27 @@ impl Database {
         let write_txn = self.begin_write()?;
 
         // First, get the session for index cleanup
-        let session_info: Option<(String, String)> = {
+        let session: Option<SessionToken> = {
             let table = write_txn.open_table(SESSIONS)?;
             let result = table.get(token)?;
             match result {
-                Some(data) => {
-                    let session: SessionToken = rmp_serde::from_slice(data.value())?;
-                    Some((session.subject_id, session.id))
-                }
+                Some(data) => Some(rmp_serde::from_slice(data.value())?),
                 None => None,
             }
         };
 
-        let deleted = match session_info {
-            Some((subject_id, session_id)) => {
+        let deleted = match session {
+            Some(session) => {
                 // Remove from sessions table
                 {
                     let mut table = write_txn.open_table(SESSIONS)?;
                     table.remove(token)?;
                 }
 
-                // Update resource_sessions index
+                // Update subject_sessions index
                 let tokens: Option<Vec<String>> = {
                     let index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
-                    let result = index_table.get(subject_id.as_str())?;
+                    let result = index_table.get(session.subject_id.as_str())?;
                     match result {
                         Some(data) => Some(rmp_serde::from_slice(data.value())?),
                         None => None,
@@ -98,17 +101,25 @@ impl Database {
                     t.retain(|v| v != token);
                     let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
                     if t.is_empty() {
-                        index_table.remove(subject_id.as_str())?;
+                        index_table.remove(session.subject_id.as_str())?;
                     } else {
                         let new_index_data = rmp_serde::to_vec_named(&t)?;
-                        index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
+                        index_table
+                            .insert(session.subject_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
 
                 // Remove from session ID index
                 {
                     let mut id_table = write_txn.open_table(SESSION_IDS)?;
-                    id_table.remove(session_id.as_str())?;
+                    id_table.remove(session.id.as_str())?;
+                }
+
+                // Remove from expiration index
+                {
+                    let mut expiry_table = write_txn.open_table(SESSION_EXPIRY)?;
+                    let ek = expiry_key(&session.expires_at, token);
+                    expiry_table.remove(ek.as_str())?;
                 }
 
                 true
@@ -120,21 +131,24 @@ impl Database {
         Ok(deleted)
     }
 
-    /// Scan all sessions, delete expired ones in a single write transaction.
-    /// No intermediate allocations beyond the expired keys collected during scan.
+    /// Delete expired sessions using the expiration index (no full table scan).
     pub fn delete_expired_sessions(&self) -> Result<usize, DatabaseError> {
         let now = chrono::Utc::now();
+        let now_ms = now.timestamp_millis();
 
-        // Phase 1: read-only scan to collect expired tokens + their metadata
-        let expired: Vec<(String, String, String)> = {
+        // Phase 1: read the expiration index to collect expired entries
+        let expired: Vec<(String, String)> = {
             let read_txn = self.begin_read()?;
-            let table = read_txn.open_table(SESSIONS)?;
+            let table = read_txn.open_table(SESSION_EXPIRY)?;
             let mut result = Vec::new();
             for entry in table.iter()? {
-                let (_, value) = entry?;
-                let session: SessionToken = rmp_serde::from_slice(value.value())?;
-                if session.is_expired_at(now) {
-                    result.push((session.token, session.subject_id, session.id));
+                let (key, value) = entry?;
+                let key_str = key.value().to_string();
+                match super::db::expiry_key_ms(&key_str) {
+                    Some(ms) if ms <= now_ms => {
+                        result.push((key_str, value.value().to_string()));
+                    }
+                    _ => break,
                 }
             }
             result
@@ -144,38 +158,58 @@ impl Database {
             return Ok(0);
         }
 
-        // Phase 2: single write transaction to delete all expired entries
+        // Phase 2: delete expired sessions and clean up all indexes
         let write_txn = self.begin_write()?;
 
-        for (token, subject_id, session_id) in &expired {
-            {
-                let mut table = write_txn.open_table(SESSIONS)?;
-                table.remove(token.as_str())?;
-            }
-
-            let tokens_in_index: Option<Vec<String>> = {
-                let index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
-                let result = index_table.get(subject_id.as_str())?;
+        for (expiry_key_val, token) in &expired {
+            // Look up the session to get subject_id and id for index cleanup
+            let session: Option<SessionToken> = {
+                let table = write_txn.open_table(SESSIONS)?;
+                let result = table.get(token.as_str())?;
                 match result {
                     Some(data) => Some(rmp_serde::from_slice(data.value())?),
                     None => None,
                 }
             };
 
-            if let Some(mut t) = tokens_in_index {
-                t.retain(|v| v != token);
-                let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
-                if t.is_empty() {
-                    index_table.remove(subject_id.as_str())?;
-                } else {
-                    let new_index_data = rmp_serde::to_vec_named(&t)?;
-                    index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
+            if let Some(session) = session {
+                {
+                    let mut table = write_txn.open_table(SESSIONS)?;
+                    table.remove(token.as_str())?;
+                }
+
+                // Clean up subject_sessions index
+                let tokens: Option<Vec<String>> = {
+                    let index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
+                    let result = index_table.get(session.subject_id.as_str())?;
+                    match result {
+                        Some(data) => Some(rmp_serde::from_slice(data.value())?),
+                        None => None,
+                    }
+                };
+
+                if let Some(mut t) = tokens {
+                    t.retain(|v| v != token);
+                    let mut index_table = write_txn.open_table(SUBJECT_SESSIONS)?;
+                    if t.is_empty() {
+                        index_table.remove(session.subject_id.as_str())?;
+                    } else {
+                        let new_index_data = rmp_serde::to_vec_named(&t)?;
+                        index_table
+                            .insert(session.subject_id.as_str(), new_index_data.as_slice())?;
+                    }
+                }
+
+                {
+                    let mut id_table = write_txn.open_table(SESSION_IDS)?;
+                    id_table.remove(session.id.as_str())?;
                 }
             }
 
+            // Remove from expiration index
             {
-                let mut id_table = write_txn.open_table(SESSION_IDS)?;
-                id_table.remove(session_id.as_str())?;
+                let mut expiry_table = write_txn.open_table(SESSION_EXPIRY)?;
+                expiry_table.remove(expiry_key_val.as_str())?;
             }
         }
 

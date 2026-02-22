@@ -15,32 +15,39 @@ pub fn start_expiration_cleaner(state: Arc<AppState>) -> JoinHandle<()> {
 
         loop {
             interval_timer.tick().await;
-
-            debug!("Running expiration cleanup");
-
-            // Clean up expired sessions
-            match session::cleanup_expired(&state.db) {
-                Ok(count) => {
-                    if count > 0 {
-                        debug!(sessions_cleaned = count, "Expired sessions cleaned");
-                    }
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to clean up expired sessions");
-                }
-            }
-
-            // Clean up expired API keys
-            match api_key::cleanup_expired(&state.db) {
-                Ok(count) => {
-                    if count > 0 {
-                        debug!(api_keys_cleaned = count, "Expired API keys cleaned");
-                    }
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to clean up expired API keys");
-                }
-            }
+            run_cleanup(&state).await;
         }
     })
+}
+
+async fn run_cleanup(state: &AppState) {
+    debug!("Running expiration cleanup");
+
+    let db = state.db.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let sessions = session::cleanup_expired(&db);
+        let api_keys = api_key::cleanup_expired(&db);
+        (sessions, api_keys)
+    })
+    .await;
+
+    let (session_result, api_key_result) = match result {
+        Ok(results) => results,
+        Err(e) => {
+            error!(error = %e, "Expiration cleanup task panicked");
+            return;
+        }
+    };
+
+    match session_result {
+        Ok(count) if count > 0 => debug!(sessions_cleaned = count, "Expired sessions cleaned"),
+        Err(e) => error!(error = %e, "Failed to clean up expired sessions"),
+        _ => {}
+    }
+
+    match api_key_result {
+        Ok(count) if count > 0 => debug!(api_keys_cleaned = count, "Expired API keys cleaned"),
+        Err(e) => error!(error = %e, "Failed to clean up expired API keys"),
+        _ => {}
+    }
 }

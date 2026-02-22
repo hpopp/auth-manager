@@ -55,7 +55,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "auth-manager"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -567,8 +567,8 @@ dependencies = [
 
 [[package]]
 name = "muster"
-version = "0.1.0"
-source = "git+https://github.com/hpopp/muster.git?tag=v0.1.0#b0615239a7af65497022685018d12b4fd1831cc4"
+version = "0.2.0"
+source = "git+https://github.com/hpopp/muster.git?tag=v0.2.0#b3a3939e2d1f434506a0a1a24a4163012d23fd95"
 dependencies = [
  "anyhow",
  "chrono",

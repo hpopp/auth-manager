@@ -1,6 +1,6 @@
 use redb::ReadableTable;
 
-use super::db::{Database, DatabaseError};
+use super::db::{expiry_key, Database, DatabaseError};
 use super::models::ApiKey;
 use super::tables::*;
 
@@ -14,30 +14,27 @@ impl Database {
         let write_txn = self.begin_write()?;
 
         // First, get the API key for index cleanup
-        let api_key_info: Option<(String, String)> = {
+        let api_key: Option<ApiKey> = {
             let table = write_txn.open_table(API_KEYS)?;
             let result = table.get(key_hash)?;
             match result {
-                Some(data) => {
-                    let api_key: ApiKey = rmp_serde::from_slice(data.value())?;
-                    Some((api_key.subject_id, api_key.id))
-                }
+                Some(data) => Some(rmp_serde::from_slice(data.value())?),
                 None => None,
             }
         };
 
-        let deleted = match api_key_info {
-            Some((subject_id, api_key_id)) => {
+        let deleted = match api_key {
+            Some(api_key) => {
                 // Remove from api_keys table
                 {
                     let mut table = write_txn.open_table(API_KEYS)?;
                     table.remove(key_hash)?;
                 }
 
-                // Update resource_api_keys index
+                // Update subject_api_keys index
                 let key_hashes: Option<Vec<String>> = {
                     let index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
-                    let result = index_table.get(subject_id.as_str())?;
+                    let result = index_table.get(api_key.subject_id.as_str())?;
                     match result {
                         Some(data) => Some(rmp_serde::from_slice(data.value())?),
                         None => None,
@@ -48,17 +45,25 @@ impl Database {
                     hashes.retain(|h| h != key_hash);
                     let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
                     if hashes.is_empty() {
-                        index_table.remove(subject_id.as_str())?;
+                        index_table.remove(api_key.subject_id.as_str())?;
                     } else {
                         let new_index_data = rmp_serde::to_vec_named(&hashes)?;
-                        index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
+                        index_table
+                            .insert(api_key.subject_id.as_str(), new_index_data.as_slice())?;
                     }
                 }
 
                 // Remove from API key ID index
                 {
                     let mut id_table = write_txn.open_table(API_KEY_IDS)?;
-                    id_table.remove(api_key_id.as_str())?;
+                    id_table.remove(api_key.id.as_str())?;
+                }
+
+                // Remove from expiration index (if the key has an expiry)
+                if let Some(ref expires_at) = api_key.expires_at {
+                    let mut expiry_table = write_txn.open_table(API_KEY_EXPIRY)?;
+                    let ek = expiry_key(expires_at, key_hash);
+                    expiry_table.remove(ek.as_str())?;
                 }
 
                 true
@@ -70,20 +75,24 @@ impl Database {
         Ok(deleted)
     }
 
-    /// Scan all API keys, delete expired ones in a single write transaction.
+    /// Delete expired API keys using the expiration index (no full table scan).
     pub fn delete_expired_api_keys(&self) -> Result<usize, DatabaseError> {
         let now = chrono::Utc::now();
+        let now_ms = now.timestamp_millis();
 
-        // Phase 1: read-only scan to collect expired key metadata
-        let expired: Vec<(String, String, String)> = {
+        // Phase 1: read the expiration index to collect expired entries
+        let expired: Vec<(String, String)> = {
             let read_txn = self.begin_read()?;
-            let table = read_txn.open_table(API_KEYS)?;
+            let table = read_txn.open_table(API_KEY_EXPIRY)?;
             let mut result = Vec::new();
             for entry in table.iter()? {
-                let (_, value) = entry?;
-                let api_key: ApiKey = rmp_serde::from_slice(value.value())?;
-                if api_key.is_expired_at(now) {
-                    result.push((api_key.key_hash, api_key.subject_id, api_key.id));
+                let (key, value) = entry?;
+                let key_str = key.value().to_string();
+                match super::db::expiry_key_ms(&key_str) {
+                    Some(ms) if ms <= now_ms => {
+                        result.push((key_str, value.value().to_string()));
+                    }
+                    _ => break,
                 }
             }
             result
@@ -93,38 +102,57 @@ impl Database {
             return Ok(0);
         }
 
-        // Phase 2: single write transaction to delete all expired entries
+        // Phase 2: delete expired API keys and clean up all indexes
         let write_txn = self.begin_write()?;
 
-        for (key_hash, subject_id, api_key_id) in &expired {
-            {
-                let mut table = write_txn.open_table(API_KEYS)?;
-                table.remove(key_hash.as_str())?;
-            }
-
-            let hashes_in_index: Option<Vec<String>> = {
-                let index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
-                let result = index_table.get(subject_id.as_str())?;
+        for (expiry_key_val, key_hash) in &expired {
+            let api_key: Option<ApiKey> = {
+                let table = write_txn.open_table(API_KEYS)?;
+                let result = table.get(key_hash.as_str())?;
                 match result {
                     Some(data) => Some(rmp_serde::from_slice(data.value())?),
                     None => None,
                 }
             };
 
-            if let Some(mut hashes) = hashes_in_index {
-                hashes.retain(|h| h != key_hash);
-                let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
-                if hashes.is_empty() {
-                    index_table.remove(subject_id.as_str())?;
-                } else {
-                    let new_index_data = rmp_serde::to_vec_named(&hashes)?;
-                    index_table.insert(subject_id.as_str(), new_index_data.as_slice())?;
+            if let Some(api_key) = api_key {
+                {
+                    let mut table = write_txn.open_table(API_KEYS)?;
+                    table.remove(key_hash.as_str())?;
+                }
+
+                // Clean up subject_api_keys index
+                let hashes: Option<Vec<String>> = {
+                    let index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
+                    let result = index_table.get(api_key.subject_id.as_str())?;
+                    match result {
+                        Some(data) => Some(rmp_serde::from_slice(data.value())?),
+                        None => None,
+                    }
+                };
+
+                if let Some(mut h) = hashes {
+                    h.retain(|v| v != key_hash);
+                    let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
+                    if h.is_empty() {
+                        index_table.remove(api_key.subject_id.as_str())?;
+                    } else {
+                        let new_index_data = rmp_serde::to_vec_named(&h)?;
+                        index_table
+                            .insert(api_key.subject_id.as_str(), new_index_data.as_slice())?;
+                    }
+                }
+
+                {
+                    let mut id_table = write_txn.open_table(API_KEY_IDS)?;
+                    id_table.remove(api_key.id.as_str())?;
                 }
             }
 
+            // Remove from expiration index
             {
-                let mut id_table = write_txn.open_table(API_KEY_IDS)?;
-                id_table.remove(api_key_id.as_str())?;
+                let mut expiry_table = write_txn.open_table(API_KEY_EXPIRY)?;
+                expiry_table.remove(expiry_key_val.as_str())?;
             }
         }
 
@@ -225,7 +253,8 @@ impl Database {
             let mut index_table = write_txn.open_table(SUBJECT_API_KEYS)?;
             let mut key_hashes: Vec<String> = index_table
                 .get(api_key.subject_id.as_str())?
-                .map(|v| rmp_serde::from_slice(v.value()).unwrap_or_default())
+                .map(|v| rmp_serde::from_slice(v.value()))
+                .transpose()?
                 .unwrap_or_default();
 
             if !key_hashes.contains(&api_key.key_hash) {
@@ -237,6 +266,13 @@ impl Database {
             // Update API key ID index (UUID -> key_hash)
             let mut id_table = write_txn.open_table(API_KEY_IDS)?;
             id_table.insert(api_key.id.as_str(), api_key.key_hash.as_str())?;
+
+            // Update expiration index (only for keys with an expiry)
+            if let Some(ref expires_at) = api_key.expires_at {
+                let mut expiry_table = write_txn.open_table(API_KEY_EXPIRY)?;
+                let ek = expiry_key(expires_at, &api_key.key_hash);
+                expiry_table.insert(ek.as_str(), api_key.key_hash.as_str())?;
+            }
         }
         write_txn.commit()?;
         Ok(())

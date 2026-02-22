@@ -99,6 +99,7 @@ pub struct ApiKey {
     /// The actor (user, service, device, etc.)
     pub subject_id: String,
     /// Permission scopes granted to this key
+    #[serde(default)]
     pub scopes: Vec<String>,
     /// When the key was last updated
     #[serde(default)]
@@ -136,6 +137,7 @@ pub enum WriteOp {
         #[serde(default)]
         description: Patch<String>,
         name: Option<String>,
+        #[serde(default)]
         scopes: Option<Vec<String>>,
     },
 }
