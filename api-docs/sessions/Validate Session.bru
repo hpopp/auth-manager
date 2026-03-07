@@ -25,6 +25,11 @@ docs {
   
   Validates a session token and returns its details if valid.
   
+  For renewable sessions (`renewable: true`), each successful verification extends
+  `expires_at` by the original `ttl_seconds` (sliding-window expiration). The
+  response reflects the updated expiry. Renewal is best-effort — if replication
+  fails, validation still succeeds with the original expiry.
+  
   ## Request Body
   
   | Field | Type   | Description                    |
@@ -49,6 +54,7 @@ docs {
       "id": "550e8400-e29b-41d4-a716-446655440000",
       "ip_address": "192.168.1.42",
       "last_used_at": "2026-02-08T10:30:00Z",
+      "renewable": true,
       "subject_id": "user-123"
     }
   }

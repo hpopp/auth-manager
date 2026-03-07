@@ -1,0 +1,43 @@
+meta {
+  name: Revoke Session by Token
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{scheme}}://{{host}}:{{port}}/sessions/revoke
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "token": "{{sessionToken}}"
+  }
+}
+
+docs {
+  # Revoke Session by Token
+  
+  Revokes (deletes) a session immediately using its secret token value,
+  rather than its UUID. Mirrors the `POST /sessions/verify` pattern.
+  
+  ## Request Body
+  
+  | Field | Type   | Description                      |
+  |-------|--------|----------------------------------|
+  | token | string | The session token to revoke      |
+  
+  ## Response
+  
+  ```json
+  {
+    "status": "success",
+    "data": null
+  }
+  ```
+}
