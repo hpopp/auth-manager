@@ -151,22 +151,22 @@ pub async fn validate_session(
     let token = req.token;
     match session::validate(&state.db, &token) {
         Ok(Some(session)) => {
+            let mut response = session_to_response(&session);
+
             if session.renewable && session.ttl_seconds > 0 {
                 let new_expires_at =
                     Utc::now() + chrono::Duration::seconds(session.ttl_seconds as i64);
                 let op = WriteOp::RenewSession {
-                    token: token.clone(),
+                    token,
                     expires_at: new_expires_at,
                 };
                 if let Err(e) = state.node.replicate(op).await {
                     tracing::warn!(error = %e, id = %session.id, "Failed to replicate session renewal");
                 }
-                let mut response = session_to_response(&session);
                 response.expires_at = new_expires_at.to_rfc3339();
-                Ok(JSend::success(response))
-            } else {
-                Ok(JSend::success(session_to_response(&session)))
             }
+
+            Ok(JSend::success(response))
         }
         Ok(None) => Err(ApiError::not_found("Session not found or expired")),
         Err(e) => Err(ApiError::internal(e.to_string())),
@@ -206,7 +206,7 @@ pub async fn revoke_session_by_token(
     }
 
     let operation = WriteOp::RevokeSession {
-        token_id: req.token.clone(),
+        token_id: req.token,
     };
     state
         .node

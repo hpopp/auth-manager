@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /sessions/revoke` endpoint for revoking a session by its secret
   token value (in addition to the existing `DELETE /sessions/:id` by UUID).
 
+[#13](https://github.com/hpopp/auth-manager/pull/13)
+
 ## [0.8.0] - 2026-02-22
 
 ### Added
