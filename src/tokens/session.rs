@@ -66,7 +66,7 @@ pub fn cleanup_expired(db: &Database) -> Result<usize, SessionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{make_session, setup_db};
+    use crate::testutil::{make_renewable_session, make_session, setup_db};
 
     #[test]
     fn test_store_and_validate_session() {
@@ -130,5 +130,52 @@ mod tests {
         assert_eq!(all.iter().skip(2).take(2).count(), 2);
         assert_eq!(all.iter().skip(4).take(2).count(), 1);
         assert_eq!(all.iter().skip(10).take(2).count(), 0);
+    }
+
+    #[test]
+    fn test_renewable_session_fields() {
+        let (db, _temp) = setup_db();
+
+        let session = make_renewable_session("s1", "user123", 3600);
+        db.put_session(&session).unwrap();
+
+        let validated = validate(&db, &session.token).unwrap().unwrap();
+        assert!(validated.renewable);
+        assert_eq!(validated.ttl_seconds, 3600);
+    }
+
+    #[test]
+    fn test_renew_session_extends_expiry() {
+        let (db, _temp) = setup_db();
+
+        let session = make_renewable_session("s1", "user123", 3600);
+        let original_expiry = session.expires_at;
+        db.put_session(&session).unwrap();
+
+        let new_expiry = Utc::now() + chrono::Duration::hours(2);
+        assert!(db.renew_session(&session.token, new_expiry).unwrap());
+
+        let renewed = db.get_session(&session.token).unwrap().unwrap();
+        assert!(renewed.expires_at > original_expiry);
+        assert_eq!(renewed.expires_at, new_expiry);
+    }
+
+    #[test]
+    fn test_renew_nonexistent_session() {
+        let (db, _temp) = setup_db();
+
+        let new_expiry = Utc::now() + chrono::Duration::hours(2);
+        assert!(!db.renew_session("nonexistent", new_expiry).unwrap());
+    }
+
+    #[test]
+    fn test_non_renewable_session_fields() {
+        let (db, _temp) = setup_db();
+
+        let session = make_session("s1", "user123");
+        db.put_session(&session).unwrap();
+
+        let validated = validate(&db, &session.token).unwrap().unwrap();
+        assert!(!validated.renewable);
     }
 }

@@ -20,6 +20,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // Sessions
         .route("/sessions", get(handlers::list_sessions))
         .route("/sessions", post(handlers::create_session))
+        .route("/sessions/revoke", post(handlers::revoke_session_by_token))
         .route("/sessions/verify", post(handlers::validate_session))
         .route("/sessions/:id", delete(handlers::revoke_session))
         .route("/sessions/:id", get(handlers::get_session))

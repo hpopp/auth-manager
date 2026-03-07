@@ -33,7 +33,10 @@ pub use admin::{admin_purge, cluster_status, health, parse_user_agent_handler};
 pub use api_keys::{
     create_api_key, get_api_key, list_api_keys, revoke_api_key, update_api_key, validate_api_key,
 };
-pub use sessions::{create_session, get_session, list_sessions, revoke_session, validate_session};
+pub use sessions::{
+    create_session, get_session, list_sessions, revoke_session, revoke_session_by_token,
+    validate_session,
+};
 
 /// Map a MusterError to an ApiError
 fn replication_error(e: muster::MusterError) -> ApiError {

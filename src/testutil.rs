@@ -65,8 +65,28 @@ pub fn make_session(id: &str, subject: &str) -> SessionToken {
         ip_address: None,
         last_used_at: None,
         metadata: None,
+        renewable: false,
         subject_id: subject.to_string(),
         token: format!("tok_{id}"),
+        ttl_seconds: 86400,
+    }
+}
+
+/// Create a renewable `SessionToken` with the given id, subject, and TTL.
+pub fn make_renewable_session(id: &str, subject: &str, ttl_seconds: u64) -> SessionToken {
+    let now = Utc::now();
+    SessionToken {
+        created_at: now,
+        device_info: DeviceInfo::default(),
+        expires_at: now + chrono::Duration::seconds(ttl_seconds as i64),
+        id: id.to_string(),
+        ip_address: None,
+        last_used_at: None,
+        metadata: None,
+        renewable: true,
+        subject_id: subject.to_string(),
+        token: format!("tok_{id}"),
+        ttl_seconds,
     }
 }
 

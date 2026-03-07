@@ -32,6 +32,9 @@ impl muster::StateMachine for AuthStateMachine {
             WriteOp::CreateSession(session) => {
                 self.db.put_session(session)?;
             }
+            WriteOp::RenewSession { token, expires_at } => {
+                self.db.renew_session(token, *expires_at)?;
+            }
             WriteOp::RevokeSession { token_id } => {
                 self.db.delete_session(token_id)?;
             }

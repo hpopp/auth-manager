@@ -22,8 +22,10 @@ fn make_session(id: &str, subject: &str) -> SessionToken {
         ip_address: None,
         last_used_at: None,
         metadata: None,
+        renewable: false,
         subject_id: subject.to_string(),
         token: format!("tok_{id}"),
+        ttl_seconds: 86400,
     }
 }
 
@@ -130,8 +132,10 @@ async fn test_session_with_metadata() {
         ip_address: None,
         last_used_at: None,
         metadata: Some(metadata),
+        renewable: false,
         subject_id: "user@example.com".to_string(),
         token: "tok_s-meta".to_string(),
+        ttl_seconds: 86400,
     };
     db.put_session(&session).unwrap();
 
@@ -183,8 +187,10 @@ async fn test_session_metadata_with_nested_values() {
         ip_address: None,
         last_used_at: None,
         metadata: Some(metadata),
+        renewable: false,
         subject_id: "user-nested".to_string(),
         token: "tok_s-nested".to_string(),
+        ttl_seconds: 86400,
     };
     db.put_session(&session).unwrap();
 

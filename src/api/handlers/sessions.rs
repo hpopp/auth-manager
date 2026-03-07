@@ -22,6 +22,8 @@ pub struct CreateSessionRequest {
     pub ip_address: Option<String>,
     #[serde(default)]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub renewable: Option<bool>,
     pub subject_id: String,
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
@@ -46,7 +48,13 @@ pub struct SessionResponse {
     pub last_used_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    pub renewable: bool,
     pub subject_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RevokeSessionByTokenRequest {
+    pub token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,8 +100,10 @@ pub async fn create_session(
         ip_address: req.ip_address.clone(),
         last_used_at: None,
         metadata: req.metadata.clone(),
+        renewable: req.renewable.unwrap_or(false),
         subject_id: req.subject_id.clone(),
         token: generate_hex(32),
+        ttl_seconds: ttl,
     };
 
     let operation = WriteOp::CreateSession(session.clone());
@@ -140,7 +150,24 @@ pub async fn validate_session(
 
     let token = req.token;
     match session::validate(&state.db, &token) {
-        Ok(Some(session)) => Ok(JSend::success(session_to_response(&session))),
+        Ok(Some(session)) => {
+            if session.renewable && session.ttl_seconds > 0 {
+                let new_expires_at =
+                    Utc::now() + chrono::Duration::seconds(session.ttl_seconds as i64);
+                let op = WriteOp::RenewSession {
+                    token: token.clone(),
+                    expires_at: new_expires_at,
+                };
+                if let Err(e) = state.node.replicate(op).await {
+                    tracing::warn!(error = %e, id = %session.id, "Failed to replicate session renewal");
+                }
+                let mut response = session_to_response(&session);
+                response.expires_at = new_expires_at.to_rfc3339();
+                Ok(JSend::success(response))
+            } else {
+                Ok(JSend::success(session_to_response(&session)))
+            }
+        }
         Ok(None) => Err(ApiError::not_found("Session not found or expired")),
         Err(e) => Err(ApiError::internal(e.to_string())),
     }
@@ -167,6 +194,27 @@ pub async fn revoke_session(
         .map_err(replication_error)?;
 
     tracing::debug!(id = %id, "Revoked session token");
+    Ok(JSend::success(()))
+}
+
+pub async fn revoke_session_by_token(
+    State(state): State<Arc<AppState>>,
+    AppJson(req): AppJson<RevokeSessionByTokenRequest>,
+) -> Result<Json<JSend<()>>, ApiError> {
+    if req.token.trim().is_empty() {
+        return Err(ApiError::bad_request("token is required"));
+    }
+
+    let operation = WriteOp::RevokeSession {
+        token_id: req.token.clone(),
+    };
+    state
+        .node
+        .replicate(operation)
+        .await
+        .map_err(replication_error)?;
+
+    tracing::debug!("Revoked session by token");
     Ok(JSend::success(()))
 }
 
@@ -230,6 +278,7 @@ fn session_to_response(session: &SessionToken) -> SessionResponse {
         ip_address: session.ip_address.clone(),
         last_used_at: session.last_used_at.map(|t| t.to_rfc3339()),
         metadata: session.metadata.clone(),
+        renewable: session.renewable,
         subject_id: session.subject_id.clone(),
     }
 }
