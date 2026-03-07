@@ -277,6 +277,46 @@ impl Database {
         }
     }
 
+    /// Extend a session's expiration (replicated via WriteOp::RenewSession)
+    pub fn renew_session(
+        &self,
+        token: &str,
+        new_expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, DatabaseError> {
+        let write_txn = self.begin_write()?;
+        let existing = {
+            let table = write_txn.open_table(SESSIONS)?;
+            let result = match table.get(token)? {
+                Some(data) => Some(rmp_serde::from_slice::<SessionToken>(data.value())?),
+                None => None,
+            };
+            result
+        };
+        let Some(mut session) = existing else {
+            write_txn.commit()?;
+            return Ok(false);
+        };
+
+        {
+            let mut expiry_table = write_txn.open_table(SESSION_EXPIRY)?;
+            let old_ek = expiry_key(&session.expires_at, token);
+            expiry_table.remove(old_ek.as_str())?;
+        }
+        session.expires_at = new_expires_at;
+        let serialized = rmp_serde::to_vec_named(&session)?;
+        {
+            let mut table = write_txn.open_table(SESSIONS)?;
+            table.insert(token, serialized.as_slice())?;
+        }
+        {
+            let mut expiry_table = write_txn.open_table(SESSION_EXPIRY)?;
+            let new_ek = expiry_key(&new_expires_at, token);
+            expiry_table.insert(new_ek.as_str(), token)?;
+        }
+        write_txn.commit()?;
+        Ok(true)
+    }
+
     /// Update last_used_at for a session (local-only, no replication)
     pub fn touch_session(&self, token: &str) -> Result<(), DatabaseError> {
         let write_txn = self.begin_write()?;

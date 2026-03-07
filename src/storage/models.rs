@@ -72,10 +72,16 @@ pub struct SessionToken {
     /// Arbitrary client-supplied key-value data (e.g. user profile info)
     #[serde(default)]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Whether verification extends expires_at by ttl_seconds (sliding window)
+    #[serde(default)]
+    pub renewable: bool,
     /// The actor (user, service, device, etc.)
     pub subject_id: String,
     /// Opaque secret token (32-byte hex, used for verification)
     pub token: String,
+    /// Original TTL used for renewal calculations
+    #[serde(default)]
+    pub ttl_seconds: u64,
 }
 
 /// An API key
@@ -131,6 +137,10 @@ pub enum WriteOp {
     },
     RevokeSession {
         token_id: String,
+    },
+    RenewSession {
+        token: String,
+        expires_at: DateTime<Utc>,
     },
     UpdateApiKey {
         key_hash: String,

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-03-07
+
+### Added
+
+- Renewable sessions: pass `renewable: true` when creating a session to enable
+  sliding-window expiration. On each successful verify, `expires_at` is extended
+  by the original `ttl_seconds`. Renewal is replicated across the cluster.
+- `POST /sessions/revoke` endpoint for revoking a session by its secret
+  token value (in addition to the existing `DELETE /sessions/:id` by UUID).
+
+[#13](https://github.com/hpopp/auth-manager/pull/13)
+
 ## [0.8.0] - 2026-02-22
 
 ### Added
